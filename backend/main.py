@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
 from fastapi import UploadFile, File
+from agents.orchestrator import Orchestrator
 
 import ast
 
@@ -8,6 +9,7 @@ app = FastAPI(
     title="AI Code Review Agent",
     version="1.0"
 )
+orchestrator = Orchestrator()
 
 class CodeInput(BaseModel):
     language: str
@@ -99,3 +101,19 @@ async def upload_file(file: UploadFile = File(...)):
         return {
             "status": "Unsupported File Type"
         }
+@app.post("/review-code")
+def review_code(data: CodeInput):
+
+    if data.language.lower() != "python":
+        return {
+            "status": "error",
+            "message": "Currently only Python AI review is supported."
+        }
+
+    result = orchestrator.review(data.code)
+
+    return {
+        "status": "success",
+        "language": data.language,
+        "review": result
+    }
