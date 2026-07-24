@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Code Review & Security Analysis Report</title>
+    <style>
+        :root {
+            --bg-main: #f8fafc;
+            --card-bg: #ffffff;
+            --text-primary: #0f172a;
+            --text-secondary: #475569;
+            --accent: #2563eb;
+            --border: #e2e8f0;
+            --radius: 8px;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-main);
+            color: var(--text-primary);
+            margin: 0;
+            padding: 0;
+            line-height: 1.6;
+        }
+        .container {
+            max-width: 1100px;
+            margin: 40px auto;
+            padding: 0 20px;
+        }
+        .header {
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+            color: #ffffff;
+            padding: 30px;
+            border-radius: var(--radius);
+            margin-bottom: 24px;
+            box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1);
+        }
+        .header h1 {
+            margin: 0 0 10px 0;
+            font-size: 28px;
+        }
+        .header-meta {
+            font-size: 14px;
+            color: #94a3b8;
+        }
+        .dashboard {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+        .card {
+            background: var(--card-bg);
+            padding: 20px;
+            border-radius: var(--radius);
+            border: 1px solid var(--border);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+            text-align: center;
+        }
+        .card-title {
+            font-size: 13px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+        }
+        .card-value {
+            font-size: 28px;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+        .badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 9999px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        .badge-critical { background-color: #fee2e2; color: #991b1b; }
+        .badge-high { background-color: #ffedd5; color: #9a3412; }
+        .badge-medium { background-color: #fef3c7; color: #92400e; }
+        .badge-low { background-color: #dbeafe; color: #1e40af; }
+        .status-approved { color: #16a34a; }
+        .status-rejected { color: #dc2626; }
+        .status-changes { color: #d97706; }
+        
+        .section {
+            background: var(--card-bg);
+            padding: 24px;
+            border-radius: var(--radius);
+            border: 1px solid var(--border);
+            margin-bottom: 24px;
+        }
+        .section-title {
+            font-size: 20px;
+            margin-top: 0;
+            margin-bottom: 16px;
+            border-bottom: 2px solid var(--bg-main);
+            padding-bottom: 8px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 12px;
+        }
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+        th {
+            background-color: #f1f5f9;
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+        .agent-tag {
+            background: #e2e8f0;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 11px;
+        }
+        .rem-card {
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 16px;
+            margin-bottom: 16px;
+            background: #fafafa;
+        }
+        .rem-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        .rem-number {
+            background: var(--accent);
+            color: white;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        .rem-title {
+            margin: 0;
+            font-size: 16px;
+        }
+        pre {
+            background: #0f172a;
+            color: #f8fafc;
+            padding: 14px;
+            border-radius: 6px;
+            overflow-x: auto;
+            font-size: 13px;
+        }
+        footer {
+            text-align: center;
+            padding: 20px;
+            color: var(--text-secondary);
+            font-size: 13px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header Banner -->
+        <div class="header">
+            <h1>AI Code Review & Security Analysis Report</h1>
+            <div class="header-meta">
+                <span>Date: 2026-07-23 22:27:49</span> | 
+                <span>Language: Python</span> | 
+                <span>Overall Status: <strong>Rejected</strong></span>
+            </div>
+        </div>
+
+        <!-- Metric Dashboard Cards -->
+        <div class="dashboard">
+            <div class="card">
+                <div class="card-title">Review Status</div>
+                <div class="card-value status-rejected">Rejected</div>
+            </div>
+            <div class="card">
+                <div class="card-title">Code Quality Score</div>
+                <div class="card-value">76<small style="font-size:16px;">/100</small></div>
+            </div>
+            <div class="card">
+                <div class="card-title">Security Score</div>
+                <div class="card-value">30<small style="font-size:16px;">/100</small></div>
+            </div>
+            <div class="card">
+                <div class="card-title">Total Findings</div>
+                <div class="card-value">13</div>
+            </div>
+        </div>
+
+        <!-- Severity Breakdown & Executive Summary -->
+        <div class="section">
+            <h2 class="section-title">Executive Summary & Severity Distribution</h2>
+            <div style="display: flex; gap: 12px; margin-bottom: 16px;">
+                <span class="badge badge-critical">Critical: 3</span>
+                <span class="badge badge-high">High: 1</span>
+                <span class="badge badge-medium">Medium: 2</span>
+                <span class="badge badge-low">Low: 7</span>
+            </div>
+            <p>CRITICAL SECURITY RISK (30/100). Critical vulnerabilities detected that must be resolved immediately. Code quality is fair (76/100). Moderate refactoring is recommended for maintainability.</p>
+        </div>
+
+        <!-- Detailed Findings Table -->
+        <div class="section">
+            <h2 class="section-title">Detailed Findings Table</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Issue</th>
+                        <th>Severity</th>
+                        <th>Line</th>
+                        <th>Agent</th>
+                        <th>Explanation</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    
+            <tr>
+                <td><strong>Variable &#x27;x&#x27; is not descriptive</strong></td>
+                <td><span class="badge badge-low">Low</span></td>
+                <td><code>5</code></td>
+                <td><span class="agent-tag">Code Analysis</span></td>
+                <td>Single-letter variable name &#x27;x&#x27; reduces code readability.</td>
+            </tr>
+            
+            <tr>
+                <td><strong>Variable &#x27;a&#x27; is not descriptive</strong></td>
+                <td><span class="badge badge-low">Low</span></td>
+                <td><code>7</code></td>
+                <td><span class="agent-tag">Code Analysis</span></td>
+                <td>Single-letter variable name &#x27;a&#x27; reduces code readability.</td>
+            </tr>
+            
+            <tr>
+                <td><strong>Variable &#x27;b&#x27; is not descriptive</strong></td>
+                <td><span class="badge badge-low">Low</span></td>
+                <td><code>8</code></td>
+                <td><span class="agent-tag">Code Analysis</span></td>
+                <td>Single-letter variable name &#x27;b&#x27; reduces code readability.</td>
+            </tr>
+            
+            <tr>
+                <td><strong>Variable &#x27;c&#x27; is not descriptive</strong></td>
+                <td><span class="badge badge-low">Low</span></td>
+                <td><code>9</code></td>
+                <td><span class="agent-tag">Code Analysis</span></td>
+                <td>Single-letter variable name &#x27;c&#x27; reduces code readability.</td>
+            </tr>
+            
+            <tr>
+                <td><strong>Function &#x27;test_func&#x27; has too many parameters</strong></td>
+                <td><span class="badge badge-medium">Medium</span></td>
+                <td><code>6</code></td>
+                <td><span class="agent-tag">Code Analysis</span></td>
+                <td>Function &#x27;test_func&#x27; has 6 parameters, exceeding the threshold of 5.</td>
+            </tr>
+            
+            <tr>
+                <td><strong>Unused import &#x27;os&#x27;</strong></td>
+                <td><span class="badge badge-low">Low</span></td>
+                <td><code>2</code></td>
+                <td><span class="agent-tag">Code Analysis</span></td>
+                <td>Import &#x27;os&#x27; is defined on line 2 but never referenced.</td>
+            </tr>
+            
+            <tr>
+                <td><strong>Unused import &#x27;pickle&#x27;</strong></td>
+                <td><span class="badge badge-low">Low</span></td>
+                <td><code>3</code></td>
+                <td><span class="agent-tag">Code Analysis</span></td>
+                <td>Import &#x27;pickle&#x27; is defined on line 3 but never referenced.</td>
+            </tr>
+            
+            <tr>
+                <td><strong>Magic number &#x27;10&#x27; detected</strong></td>
+                <td><span class="badge badge-low">Low</span></td>
+                <td><code>5</code></td>
+                <td><span class="agent-tag">Code Analysis</span></td>
+                <td>Literal number 10 is hardcoded without explanation. Consider replacing it with a named constant.</td>
+            </tr>
+            
+            <tr>
+                <td><strong>Maintainability Score: 61.5/100</strong></td>
+                <td><span class="badge badge-medium">Medium</span></td>
+                <td><code>0</code></td>
+                <td><span class="agent-tag">Code Analysis</span></td>
+                <td>Code maintainability score is 61.5/100 based on Halstead volume (85.8), total cyclomatic complexity (5), and lines of code (13).</td>
+            </tr>
+            
+            <tr>
+                <td><strong>Use of eval()</strong></td>
+                <td><span class="badge badge-critical">Critical</span></td>
+                <td><code>10</code></td>
+                <td><span class="agent-tag">Security</span></td>
+                <td>The dynamic code execution function &#x27;eval()&#x27; evaluates arbitrary strings as code, leading to arbitrary code execution.</td>
+            </tr>
+            
+            <tr>
+                <td><strong>Hardcoded credential: password</strong></td>
+                <td><span class="badge badge-high">High</span></td>
+                <td><code>12</code></td>
+                <td><span class="agent-tag">Security</span></td>
+                <td>Hardcoded secret or credential stored in variable &#x27;password&#x27;. Move sensitive values to environment variables or key vaults.</td>
+            </tr>
+            
+            <tr>
+                <td><strong>SQL Injection in execute() call</strong></td>
+                <td><span class="badge badge-critical">Critical</span></td>
+                <td><code>13</code></td>
+                <td><span class="agent-tag">Security</span></td>
+                <td>Dynamic query argument passed to execute(). Pass query parameters as a tuple/list in the second argument instead.</td>
+            </tr>
+            
+            <tr>
+                <td><strong>SQL Injection Vulnerability</strong></td>
+                <td><span class="badge badge-critical">Critical</span></td>
+                <td><code>13</code></td>
+                <td><span class="agent-tag">Security</span></td>
+                <td>SQL query is constructed using string concatenation. Use parameterized queries (e.g., cursor.execute(&#x27;SELECT * FROM t WHERE id = %s&#x27;, (id,))) to prevent SQL injection.</td>
+            </tr>
+            
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Remediation Section -->
+        <div class="section">
+            <h2 class="section-title">Remediation Guidance</h2>
+            
+            <div class="rem-card">
+                <div class="rem-header">
+                    <span class="rem-number">#1</span>
+                    <h4 class="rem-title">Variable &#x27;x&#x27; is not descriptive (Line 5)</h4>
+                </div>
+                <div class="rem-body">
+                    <p><strong>Problem:</strong> Single-letter or cryptic variable names obscure code intent, making code maintenance, debugging, and code reviews difficult.</p>
+                    <p><strong>Recommended Fix:</strong> Rename variables to descriptive, self-explanatory names matching Python PEP 8 conventions.</p>
+                    <pre><code># Refactored descriptive variable names:
+total_users = len(user_list)
+for user_index in range(total_users):
+    process_user(user_index)</code></pre>
+                    <p><strong>Best Practice:</strong> Use meaningful, intention-revealing names for variables, functions, and classes following PEP 8 naming style guidelines.</p>
+                    <div class="rem-refs"><strong>References:</strong><ul><li>PEP 8 - Style Guide for Python Code (Naming Conventions)</li><li>Clean Code: Chapter 2 - Meaningful Names</li></ul></div>
+                </div>
+            </div>
+            
+            <div class="rem-card">
+                <div class="rem-header">
+                    <span class="rem-number">#2</span>
+                    <h4 class="rem-title">Variable &#x27;a&#x27; is not descriptive (Line 7)</h4>
+                </div>
+                <div class="rem-body">
+                    <p><strong>Problem:</strong> Single-letter or cryptic variable names obscure code intent, making code maintenance, debugging, and code reviews difficult.</p>
+                    <p><strong>Recommended Fix:</strong> Rename variables to descriptive, self-explanatory names matching Python PEP 8 conventions.</p>
+                    <pre><code># Refactored descriptive variable names:
+total_users = len(user_list)
+for user_index in range(total_users):
+    process_user(user_index)</code></pre>
+                    <p><strong>Best Practice:</strong> Use meaningful, intention-revealing names for variables, functions, and classes following PEP 8 naming style guidelines.</p>
+                    <div class="rem-refs"><strong>References:</strong><ul><li>PEP 8 - Style Guide for Python Code (Naming Conventions)</li><li>Clean Code: Chapter 2 - Meaningful Names</li></ul></div>
+                </div>
+            </div>
+            
+            <div class="rem-card">
+                <div class="rem-header">
+                    <span class="rem-number">#3</span>
+                    <h4 class="rem-title">Variable &#x27;b&#x27; is not descriptive (Line 8)</h4>
+                </div>
+                <div class="rem-body">
+                    <p><strong>Problem:</strong> Single-letter or cryptic variable names obscure code intent, making code maintenance, debugging, and code reviews difficult.</p>
+                    <p><strong>Recommended Fix:</strong> Rename variables to descriptive, self-explanatory names matching Python PEP 8 conventions.</p>
+                    <pre><code># Refactored descriptive variable names:
+total_users = len(user_list)
+for user_index in range(total_users):
+    process_user(user_index)</code></pre>
+                    <p><strong>Best Practice:</strong> Use meaningful, intention-revealing names for variables, functions, and classes following PEP 8 naming style guidelines.</p>
+                    <div class="rem-refs"><strong>References:</strong><ul><li>PEP 8 - Style Guide for Python Code (Naming Conventions)</li><li>Clean Code: Chapter 2 - Meaningful Names</li></ul></div>
+                </div>
+            </div>
+            
+            <div class="rem-card">
+                <div class="rem-header">
+                    <span class="rem-number">#4</span>
+                    <h4 class="rem-title">Variable &#x27;c&#x27; is not descriptive (Line 9)</h4>
+                </div>
+                <div class="rem-body">
+                    <p><strong>Problem:</strong> Single-letter or cryptic variable names obscure code intent, making code maintenance, debugging, and code reviews difficult.</p>
+                    <p><strong>Recommended Fix:</strong> Rename variables to descriptive, self-explanatory names matching Python PEP 8 conventions.</p>
+                    <pre><code># Refactored descriptive variable names:
+total_users = len(user_list)
+for user_index in range(total_users):
+    process_user(user_index)</code></pre>
+                    <p><strong>Best Practice:</strong> Use meaningful, intention-revealing names for variables, functions, and classes following PEP 8 naming style guidelines.</p>
+                    <div class="rem-refs"><strong>References:</strong><ul><li>PEP 8 - Style Guide for Python Code (Naming Conventions)</li><li>Clean Code: Chapter 2 - Meaningful Names</li></ul></div>
+                </div>
+            </div>
+            
+            <div class="rem-card">
+                <div class="rem-header">
+                    <span class="rem-number">#5</span>
+                    <h4 class="rem-title">Function &#x27;test_func&#x27; has too many parameters (Line 6)</h4>
+                </div>
+                <div class="rem-body">
+                    <p><strong>Problem:</strong> Functions with excessive parameters (&gt; 5) indicate high coupling, poor encapsulation, and make calls error-prone.</p>
+                    <p><strong>Recommended Fix:</strong> Group related parameters into a dataclass, Pydantic model, or parameter object.</p>
+                    <pre><code># Parameter Object Refactoring:
+from dataclasses import dataclass
+
+@dataclass
+class FilterOptions:
+    category: str
+    min_price: float
+    max_price: float
+    is_active: bool
+
+def search_products(options: FilterOptions):
+    # Logic using options object
+    pass</code></pre>
+                    <p><strong>Best Practice:</strong> Keep parameter lists short (&lt;= 3-4 arguments). Pass cohesive data attributes wrapped in a typed dataclass.</p>
+                    <div class="rem-refs"><strong>References:</strong><ul><li>Refactoring by Martin Fowler (Introduce Parameter Object)</li><li>Clean Code: Function Arguments</li></ul></div>
+                </div>
+            </div>
+            
+            <div class="rem-card">
+                <div class="rem-header">
+                    <span class="rem-number">#6</span>
+                    <h4 class="rem-title">Unused import &#x27;os&#x27; (Line 2)</h4>
+                </div>
+                <div class="rem-body">
+                    <p><strong>Problem:</strong> Unused import statements clutter module namespaces, increase startup overhead, and create unnecessary package dependencies.</p>
+                    <p><strong>Recommended Fix:</strong> Remove unused import statements from the top of the file.</p>
+                    <pre><code># Clean module import header:
+import os
+# Removed unused module imports</code></pre>
+                    <p><strong>Best Practice:</strong> Keep module imports clean and minimal. Use automated tools like autoflake, ruff, or black to automatically prune unused imports.</p>
+                    <div class="rem-refs"><strong>References:</strong><ul><li>PEP 8 - Imports section</li><li>Ruff / Autoflake Linters</li></ul></div>
+                </div>
+            </div>
+            
+            <div class="rem-card">
+                <div class="rem-header">
+                    <span class="rem-number">#7</span>
+                    <h4 class="rem-title">Unused import &#x27;pickle&#x27; (Line 3)</h4>
+                </div>
+                <div class="rem-body">
+                    <p><strong>Problem:</strong> Deserializing untrusted data using pickle, marshal, shelve, or yaml.load() allows arbitrary Python object reconstruction, leading directly to Remote Code Execution (RCE).</p>
+                    <p><strong>Recommended Fix:</strong> Replace unsafe deserializers with standardized, safe serialization formats like JSON (json.loads) or use yaml.safe_load().</p>
+                    <pre><code># Secure JSON deserialization:
+import json
+data = json.loads(user_json_str)
+
+# Secure YAML deserialization:
+import yaml
+config = yaml.safe_load(user_yaml_str)</code></pre>
+                    <p><strong>Best Practice:</strong> Never deserialize untrusted data with pickle or marshal. Use safe, language-independent data exchange formats like JSON or Protocol Buffers.</p>
+                    <div class="rem-refs"><strong>References:</strong><ul><li>OWASP Top 10: A08:2021 - Software and Data Integrity Failures</li><li>OWASP Deserialization Cheat Sheet</li><li>CWE-502: Deserialization of Untrusted Data</li><li>Python pickle Module Security Warning</li></ul></div>
+                </div>
+            </div>
+            
+            <div class="rem-card">
+                <div class="rem-header">
+                    <span class="rem-number">#8</span>
+                    <h4 class="rem-title">Magic number &#x27;10&#x27; detected (Line 5)</h4>
+                </div>
+                <div class="rem-body">
+                    <p><strong>Problem:</strong> Hardcoded numeric literals embedded in logic hide business meaning and make values difficult to update consistently.</p>
+                    <p><strong>Recommended Fix:</strong> Replace numeric literals with uppercase named constants at module or class scope.</p>
+                    <pre><code># Named constants example:
+MAX_RETRY_ATTEMPTS = 5
+TIMEOUT_SECONDS = 30
+
+if attempts &gt; MAX_RETRY_ATTEMPTS:
+    raise TimeoutError(&#x27;Max retries exceeded&#x27;)</code></pre>
+                    <p><strong>Best Practice:</strong> Define descriptive, UPPERCASE named constants for numbers (other than standard 0, 1) to convey context and intent.</p>
+                    <div class="rem-refs"><strong>References:</strong><ul><li>Refactoring by Martin Fowler (Replace Magic Number with Symbolic Constant)</li><li>PEP 8 - Constants naming convention</li></ul></div>
+                </div>
+            </div>
+            
+            <div class="rem-card">
+                <div class="rem-header">
+                    <span class="rem-number">#9</span>
+                    <h4 class="rem-title">Maintainability Score: 61.5/100 (Line 0)</h4>
+                </div>
+                <div class="rem-body">
+                    <p><strong>Problem:</strong> High cyclomatic complexity means functions contain extensive branching and decision paths, leading to high bug risk and complex testing requirements.</p>
+                    <p><strong>Recommended Fix:</strong> Simplify decision trees by applying early guard clause returns or extracting decision branches into dedicated helper functions.</p>
+                    <pre><code># Refactored with guard clauses:
+def process_transaction(transaction):
+    if not transaction.is_valid:
+        return False
+    if transaction.is_processed:
+        return True
+    return execute_transaction(transaction)</code></pre>
+                    <p><strong>Best Practice:</strong> Maintain cyclomatic complexity &lt;= 5 per function. Use guard clauses, lookup dictionaries, or polymorphic classes to replace complex nested conditionals.</p>
+                    <div class="rem-refs"><strong>References:</strong><ul><li>McCabe Cyclomatic Complexity Metric</li><li>Refactoring: Replace Nested Conditional with Guard Clauses</li></ul></div>
+                </div>
+            </div>
+            
+            <div class="rem-card">
+                <div class="rem-header">
+                    <span class="rem-number">#10</span>
+                    <h4 class="rem-title">Use of eval() (Line 10)</h4>
+                </div>
+                <div class="rem-body">
+                    <p><strong>Problem:</strong> eval() and exec() parse and execute arbitrary text strings as Python code, providing an immediate path for arbitrary Remote Code Execution (RCE).</p>
+                    <p><strong>Recommended Fix:</strong> Remove eval()/exec() calls. Use safe data literal parsing with ast.literal_eval() or explicit dictionary mappings for operations.</p>
+                    <pre><code># Secure literal parsing:
+import ast
+safe_data = ast.literal_eval(user_input_string)
+
+# Secure dynamic dispatch:
+ACTIONS = {&#x27;start&#x27;: start_service, &#x27;stop&#x27;: stop_service}
+if action in ACTIONS:
+    ACTIONS[action]()</code></pre>
+                    <p><strong>Best Practice:</strong> Avoid dynamic code execution. Parse structured data with standard serializers (JSON/YAML) or safe AST evaluation tools like ast.literal_eval().</p>
+                    <div class="rem-refs"><strong>References:</strong><ul><li>OWASP Top 10: A03:2021 - Injection</li><li>CWE-95: Improper Neutralization of Directives in Dynamically Evaluated Code (&#x27;Eval Injection&#x27;)</li><li>Python ast.literal_eval Documentation</li></ul></div>
+                </div>
+            </div>
+            
+            <div class="rem-card">
+                <div class="rem-header">
+                    <span class="rem-number">#11</span>
+                    <h4 class="rem-title">Hardcoded credential: password (Line 12)</h4>
+                </div>
+                <div class="rem-body">
+                    <p><strong>Problem:</strong> Hardcoding API keys, passwords, private keys, AWS secrets, or JWT secrets in code files exposes credentials in version control systems and built packages.</p>
+                    <p><strong>Recommended Fix:</strong> Extract secrets from source code files and load them dynamically from environment variables or a secret vault.</p>
+                    <pre><code># Secure environment variable secret loading:
+import os
+api_secret = os.getenv(&#x27;API_SECRET&#x27;)
+if not api_secret:
+    raise RuntimeError(&#x27;API_SECRET environment variable is missing&#x27;)</code></pre>
+                    <p><strong>Best Practice:</strong> Follow 12-Factor App principles. Keep secrets in environment variables or secret management services (AWS Secrets Manager, Vault) and include .env in .gitignore.</p>
+                    <div class="rem-refs"><strong>References:</strong><ul><li>OWASP Top 10: A02:2021 - Cryptographic Failures</li><li>OWASP Secrets Management Cheat Sheet</li><li>CWE-798: Use of Hard-coded Credentials</li><li>The Twelve-Factor App: Config III</li></ul></div>
+                </div>
+            </div>
+            
+            <div class="rem-card">
+                <div class="rem-header">
+                    <span class="rem-number">#12</span>
+                    <h4 class="rem-title">SQL Injection in execute() call (Line 13)</h4>
+                </div>
+                <div class="rem-body">
+                    <p><strong>Problem:</strong> Constructing SQL queries by concatenating strings or formatting variables directly allows attackers to inject malicious SQL commands, leading to unauthorized database access, data theft, or database alteration.</p>
+                    <p><strong>Recommended Fix:</strong> Use parameterized queries (prepared statements) provided by your database library. Parameterized queries enforce strict separation between SQL code and user data.</p>
+                    <pre><code># Secure parameterized query example:
+cursor.execute(&#x27;SELECT * FROM users WHERE username = %s AND status = %s&#x27;, (username, status))
+
+# Using SQLAlchemy ORM:
+user = session.query(User).filter_by(username=username).first()</code></pre>
+                    <p><strong>Best Practice:</strong> Never format or concatenate variables directly into SQL statements. Always use parameterized placeholders (%s, ?, :val) or an Object-Relational Mapper (ORM).</p>
+                    <div class="rem-refs"><strong>References:</strong><ul><li>OWASP Top 10: A03:2021 - Injection</li><li>OWASP SQL Injection Prevention Cheat Sheet</li><li>CWE-89: Improper Neutralization of Special Elements used in an SQL Command (&#x27;SQL Injection&#x27;)</li><li>Python DB-API 2.0 Specification (PEP 249)</li></ul></div>
+                </div>
+            </div>
+            
+            <div class="rem-card">
+                <div class="rem-header">
+                    <span class="rem-number">#13</span>
+                    <h4 class="rem-title">SQL Injection Vulnerability (Line 13)</h4>
+                </div>
+                <div class="rem-body">
+                    <p><strong>Problem:</strong> Constructing SQL queries by concatenating strings or formatting variables directly allows attackers to inject malicious SQL commands, leading to unauthorized database access, data theft, or database alteration.</p>
+                    <p><strong>Recommended Fix:</strong> Use parameterized queries (prepared statements) provided by your database library. Parameterized queries enforce strict separation between SQL code and user data.</p>
+                    <pre><code># Secure parameterized query example:
+cursor.execute(&#x27;SELECT * FROM users WHERE username = %s AND status = %s&#x27;, (username, status))
+
+# Using SQLAlchemy ORM:
+user = session.query(User).filter_by(username=username).first()</code></pre>
+                    <p><strong>Best Practice:</strong> Never format or concatenate variables directly into SQL statements. Always use parameterized placeholders (%s, ?, :val) or an Object-Relational Mapper (ORM).</p>
+                    <div class="rem-refs"><strong>References:</strong><ul><li>OWASP Top 10: A03:2021 - Injection</li><li>OWASP SQL Injection Prevention Cheat Sheet</li><li>CWE-89: Improper Neutralization of Special Elements used in an SQL Command (&#x27;SQL Injection&#x27;)</li><li>Python DB-API 2.0 Specification (PEP 249)</li></ul></div>
+                </div>
+            </div>
+            
+        </div>
+
+        <!-- PR Review & Recommendations -->
+        <div class="section">
+            <h2 class="section-title">PR Review Summary & Next Steps</h2>
+            <h3>Top Priority Risks</h3><ul><li>Line 10 [Critical]: Use of eval() - The dynamic code execution function &#x27;eval()&#x27; evaluates arbitrary strings as code, leading to arbitrary code execution.</li><li>Line 13 [Critical]: SQL Injection in execute() call - Dynamic query argument passed to execute(). Pass query parameters as a tuple/list in the second argument instead.</li><li>Line 13 [Critical]: SQL Injection Vulnerability - SQL query is constructed using string concatenation. Use parameterized queries (e.g., cursor.execute(&#x27;SELECT * FROM t WHERE id = %s&#x27;, (id,))) to prevent SQL injection.</li><li>Line 12 [High]: Hardcoded credential: password - Hardcoded secret or credential stored in variable &#x27;password&#x27;. Move sensitive values to environment variables or key vaults.</li><li>Line 6 [Medium]: Function &#x27;test_func&#x27; has too many parameters - Function &#x27;test_func&#x27; has 6 parameters, exceeding the threshold of 5.</li></ul>
+            <h3>Recommended Next Steps</h3><ul><li>Immediately resolve Critical severity security vulnerabilities (SQL Injection in execute() call, Use of eval()).</li><li>Remediate 1 High-severity issues prior to merging PR.</li><li>Address 9 Medium/Low maintainability and code quality suggestions.</li><li>Apply provided automated code remediation refactoring examples.</li></ul>
+        </div>
+
+        <footer>
+            Generated by AI Code Review & Security Analysis Agent &bull; Confidential Code Audit Report
+        </footer>
+    </div>
+</body>
+</html>
