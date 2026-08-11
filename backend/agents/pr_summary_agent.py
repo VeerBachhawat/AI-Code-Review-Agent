@@ -1,10 +1,16 @@
 import json
+import logging
+from typing import List, Dict, Any, Tuple
+
+from backend.llm.ollama_service import ollama_service
+
+logger = logging.getLogger(__name__)
 
 
 class PRSummaryAgent:
     """
     PR Summary Agent that aggregates analysis findings and remediation suggestions
-    into a professional, executive Pull Request code review summary.
+    into a professional, mentor-style Pull Request code review summary.
     """
 
     SEVERITY_WEIGHTS = {
@@ -21,7 +27,7 @@ class PRSummaryAgent:
         "low": 1
     }
 
-    def generate_summary(self, findings, remediations=None, security_findings=None):
+    def generate_summary(self, findings, remediations=None, security_findings=None) -> Dict[str, Any]:
         """
         Main entry point for generating a Pull Request review summary.
         Accepts findings (list or dict), optional remediations, and optional security_findings.
@@ -35,41 +41,56 @@ class PRSummaryAgent:
         if not code_findings and not sec_findings and all_findings:
             code_findings, sec_findings = self._classify_unlabeled_findings(all_findings)
 
-        # 1. Scoring Calculation
+        # 1. Preserved Scoring & Metrics Calculation
         code_quality_score = self._calculate_score(code_findings)
         security_score = self._calculate_score(sec_findings)
-
-        # 2. Severity Breakdown Counts
         counts = self._calculate_counts(all_findings)
 
-        # 3. Determine Overall Review Status
-        overall_status = self._determine_status(counts, security_score, code_quality_score)
-
-        # 4. Extract Top Risks
-        top_risks = self._extract_top_risks(all_findings, limit=5)
-
-        # 5. Summaries
-        code_quality_summary = self._build_code_quality_summary(code_findings, code_quality_score)
-        security_summary = self._build_security_summary(sec_findings, security_score)
-
-        # 6. Positive Observations
-        positive_observations = self._build_positive_observations(all_findings, code_findings, sec_findings)
-
-        # 7. Recommended Next Steps
-        recommended_next_steps = self._build_recommended_next_steps(all_findings, all_remediations)
-
-        # 8. Estimated Remediation Effort
-        estimated_effort = self._estimate_effort(counts)
-
-        # 9. Developer PR Review Comment
-        developer_comment = self._build_developer_comment(
-            overall_status=overall_status,
+        # 2. Rule-Based Summary Fallbacks
+        rule_status = self._determine_status(counts, security_score, code_quality_score)
+        rule_top_risks = self._extract_top_risks(all_findings, limit=5)
+        rule_code_quality_summary = self._build_code_quality_summary(code_findings, code_quality_score)
+        rule_security_summary = self._build_security_summary(sec_findings, security_score)
+        rule_positive_observations = self._build_positive_observations(all_findings, code_findings, sec_findings)
+        rule_recommended_next_steps = self._build_recommended_next_steps(all_findings, all_remediations)
+        rule_estimated_effort = self._estimate_effort(counts)
+        rule_developer_comment = self._build_developer_comment(
+            overall_status=rule_status,
             code_quality_score=code_quality_score,
             security_score=security_score,
             counts=counts,
-            top_risks=top_risks,
-            recommended_next_steps=recommended_next_steps
+            top_risks=rule_top_risks,
+            recommended_next_steps=rule_recommended_next_steps
         )
+
+        # 3. Attempt Ollama LLM Summary Generation
+        try:
+            ollama_data = self._ollama_generate_summary(
+                all_findings=all_findings,
+                all_remediations=all_remediations,
+                code_quality_score=code_quality_score,
+                security_score=security_score,
+                counts=counts
+            )
+            overall_status = ollama_data.get("overall_status") or rule_status
+            top_risks = ollama_data.get("top_risks") if isinstance(ollama_data.get("top_risks"), list) else rule_top_risks
+            code_quality_summary = ollama_data.get("code_quality_summary") or rule_code_quality_summary
+            security_summary = ollama_data.get("security_summary") or rule_security_summary
+            positive_observations = ollama_data.get("positive_observations") if isinstance(ollama_data.get("positive_observations"), list) else rule_positive_observations
+            recommended_next_steps = ollama_data.get("recommended_next_steps") if isinstance(ollama_data.get("recommended_next_steps"), list) else rule_recommended_next_steps
+            estimated_effort = ollama_data.get("estimated_remediation_effort") if isinstance(ollama_data.get("estimated_remediation_effort"), dict) else rule_estimated_effort
+            developer_comment = ollama_data.get("developer_comment") or rule_developer_comment
+
+        except Exception as e:
+            logger.warning(f"Ollama PR Summary generation failed ({str(e)}). Falling back to rule-based PR summary.")
+            overall_status = rule_status
+            top_risks = rule_top_risks
+            code_quality_summary = rule_code_quality_summary
+            security_summary = rule_security_summary
+            positive_observations = rule_positive_observations
+            recommended_next_steps = rule_recommended_next_steps
+            estimated_effort = rule_estimated_effort
+            developer_comment = rule_developer_comment
 
         return {
             "overall_status": overall_status,
@@ -85,19 +106,79 @@ class PRSummaryAgent:
             "developer_comment": developer_comment
         }
 
-    def summarize(self, findings, remediations=None, security_findings=None):
+    def summarize(self, findings, remediations=None, security_findings=None) -> Dict[str, Any]:
         """Alias for generate_summary to preserve compatibility."""
         return self.generate_summary(findings, remediations, security_findings)
 
-    def analyze(self, findings, remediations=None, security_findings=None):
+    def analyze(self, findings, remediations=None, security_findings=None) -> Dict[str, Any]:
         """Alias for generate_summary to preserve compatibility."""
         return self.generate_summary(findings, remediations, security_findings)
 
+    def _ollama_generate_summary(
+        self,
+        all_findings: list,
+        all_remediations: list,
+        code_quality_score: int,
+        security_score: int,
+        counts: dict
+    ) -> dict:
+        """
+        Calls Ollama LLM to generate a mentor-style Pull Request review summary.
+        """
+        if ollama_service is None:
+            raise RuntimeError("Ollama service module unavailable.")
+
+        client = ollama_service
+
+        compact_findings = []
+        for f in all_findings[:8]:
+            compact_findings.append({
+                "issue": f.get("issue"),
+                "severity": f.get("severity")
+            })
+
+        prompt = f"""You are a senior engineer mentoring a junior developer on a Pull Request.
+
+Metrics:
+- Code Quality Score: {code_quality_score}/100
+- Security Score: {security_score}/100
+- Findings: {json.dumps(counts)}
+- Top Issues: {json.dumps(compact_findings)}
+
+Return a concise JSON object:
+{{
+  "overall_status": "Approved | Approved with Suggestions | Needs Changes | Rejected",
+  "top_risks": ["1. Fix critical security issues"],
+  "code_quality_summary": "Brief 1-sentence code quality assessment.",
+  "security_summary": "Brief 1-sentence security assessment.",
+  "positive_observations": ["Good effort on structure."],
+  "recommended_next_steps": ["Address high severity security findings first."],
+  "estimated_remediation_effort": {{
+    "critical": "0 hours",
+    "high": "1 hour",
+    "overall": "Low"
+  }},
+  "developer_comment": "### PR Review Summary\\n**Status**: {counts.get('critical', 0)} critical issues found. Please address security findings before merging."
+}}
+"""
+
+        system_prompt = "You are a supportive senior engineer mentoring junior developers. Output valid JSON only."
+        result = client.generate_json(prompt=prompt, system_prompt=system_prompt, temperature=0.1, max_tokens=250)
+
+        if not isinstance(result, dict):
+            raise ValueError("Ollama returned non-dictionary JSON.")
+
+        valid_statuses = {"Approved", "Approved with Suggestions", "Needs Changes", "Rejected"}
+        if result.get("overall_status") not in valid_statuses:
+            result["overall_status"] = "Needs Changes" if counts["critical"] > 0 or counts["high"] > 0 else "Approved with Suggestions"
+
+        return result
+
     # --------------------------------------------------------------------------
-    # Helper Methods
+    # Helper Rule-Based Methods (Fallback)
     # --------------------------------------------------------------------------
 
-    def _normalize_inputs(self, findings, remediations=None, security_findings=None):
+    def _normalize_inputs(self, findings, remediations=None, security_findings=None) -> Tuple[list, list]:
         all_findings = []
         all_remediations = []
 
@@ -140,7 +221,7 @@ class PRSummaryAgent:
 
         return all_findings, all_remediations
 
-    def _classify_unlabeled_findings(self, findings):
+    def _classify_unlabeled_findings(self, findings) -> Tuple[list, list]:
         sec_keywords = {"sql", "xss", "auth", "permission", "traversal", "injection", "eval", "exec", "crypto", "secret", "password", "ssrf", "pickle", "shell"}
         code_findings = []
         sec_findings = []
@@ -197,37 +278,37 @@ class PRSummaryAgent:
         )
 
         top_risks = []
-        for f in sorted_findings[:limit]:
+        for i, f in enumerate(sorted_findings[:limit], 1):
             line = f.get("line", 0)
             sev = f.get("severity", "Medium")
             issue = f.get("issue", "Issue")
             explanation = f.get("explanation", "")
-            risk_str = f"Line {line} [{sev}]: {issue}"
+            risk_str = f"Priority {i} - Line {line} [{sev}]: {issue}"
             if explanation:
-                risk_str += f" - {explanation}"
+                risk_str += f" ({explanation})"
             top_risks.append(risk_str)
 
         return top_risks
 
     def _build_code_quality_summary(self, code_findings, score: int) -> str:
         if not code_findings:
-            return "Code quality is excellent. No code maintainability or style issues were detected."
+            return "Great work! Your code quality is clean, readable, and easy to maintain."
         elif score >= 80:
-            return f"Code quality is good ({score}/100) with minor maintainability suggestions noted."
+            return f"Good code quality ({score}/100) with minor maintainability suggestions to clean up."
         elif score >= 60:
-            return f"Code quality is fair ({score}/100). Moderate refactoring is recommended for maintainability."
+            return f"Fair code quality ({score}/100). Consider breaking down long functions to improve readability."
         else:
-            return f"Code quality requires improvement ({score}/100). High complexity or duplication detected."
+            return f"Code quality needs improvement ({score}/100). High complexity or duplication detected."
 
     def _build_security_summary(self, sec_findings, score: int) -> str:
         if not sec_findings:
-            return "Security analysis passed cleanly. No security vulnerabilities were detected."
+            return "Security checks passed! No security vulnerabilities were detected in your code."
         elif score >= 80:
-            return f"Security posture is relatively sound ({score}/100), but minor vulnerabilities require attention."
+            return f"Security posture is solid ({score}/100), but minor items require attention."
         elif score >= 50:
-            return f"Security posture has significant vulnerabilities ({score}/100) that need remediation before deployment."
+            return f"Security posture has notable items ({score}/100) that should be fixed before merging."
         else:
-            return f"CRITICAL SECURITY RISK ({score}/100). Critical vulnerabilities detected that must be resolved immediately."
+            return f"Critical security items flagged ({score}/100). Please resolve these before deployment."
 
     def _build_positive_observations(self, all_findings, code_findings, sec_findings) -> list:
         positives = []
@@ -235,16 +316,16 @@ class PRSummaryAgent:
         high_count = sum(1 for f in all_findings if f.get("severity", "").lower() == "high")
 
         if critical_count == 0:
-            positives.append("No critical severity vulnerabilities or system-blocking defects were identified.")
+            positives.append("No critical security vulnerabilities were found.")
         if high_count == 0:
-            positives.append("Zero high-severity security breaches or hardcoded credentials detected.")
+            positives.append("Zero high-severity security issues or exposed passwords detected.")
         if len(code_findings) == 0:
-            positives.append("Code structure adheres cleanly to Python modularity and complexity guidelines.")
+            positives.append("Code structure is clean, modular, and follows Python style guidelines.")
         if len(sec_findings) == 0:
-            positives.append("Application passed automated AST security scanning with no flagged vulnerabilities.")
+            positives.append("Passed automated security scanning with clean results.")
 
         if not positives:
-            positives.append("The codebase demonstrates modular layout and standard AST parsing compatibility.")
+            positives.append("Code is formatted cleanly and adheres to standard Python syntax.")
 
         return positives
 
@@ -256,17 +337,17 @@ class PRSummaryAgent:
 
         if critical_findings:
             issues = ", ".join({f.get("issue", "Critical issue") for f in critical_findings[:2]})
-            steps.append(f"Immediately resolve Critical severity security vulnerabilities ({issues}).")
+            steps.append(f"1. Immediately resolve Critical security items ({issues}).")
         if high_findings:
-            steps.append(f"Remediate {len(high_findings)} High-severity issues prior to merging PR.")
+            steps.append(f"2. Fix High-severity issues before merging the PR.")
         if other_findings:
-            steps.append(f"Address {len(other_findings)} Medium/Low maintainability and code quality suggestions.")
+            steps.append(f"3. Address minor code quality and readability suggestions.")
 
         if remediations:
-            steps.append("Apply provided automated code remediation refactoring examples.")
+            steps.append("4. Apply the provided step-by-step code fixes.")
 
         if not steps:
-            steps.append("Proceed with final peer review and merge into target branch.")
+            steps.append("Everything looks great! Ready to merge.")
 
         return steps
 
@@ -275,8 +356,8 @@ class PRSummaryAgent:
         high = counts.get("high", 0)
         total = counts.get("total_findings", 0)
 
-        crit_effort = f"{crit * 2} hours" if crit > 0 else "0 hours (None detected)"
-        high_effort = f"{high * 1.5:.1f} hours" if high > 0 else "0 hours (None detected)"
+        crit_effort = f"{crit * 2} hours" if crit > 0 else "0 hours"
+        high_effort = f"{high * 1.5:.1f} hours" if high > 0 else "0 hours"
 
         if crit > 0 or high > 3:
             overall_effort = "High (1-2 days)"
@@ -306,25 +387,28 @@ class PRSummaryAgent:
             f"**Overall Status:** `{overall_status}`",
             f"**Security Score:** `{security_score}/100` | **Code Quality Score:** `{code_quality_score}/100`",
             "",
-            "### 📊 Findings Breakdown",
-            f"- **Total Findings:** {counts['total_findings']}",
-            f"- **Critical:** {counts['critical']} | **High:** {counts['high']} | **Medium:** {counts['medium']} | **Low:** {counts['low']}",
+            "### Executive Summary",
+            f"Thanks for submitting this pull request! The code has been reviewed for security and readability.",
+            f"We found **{counts['total_findings']} total findings** ({counts['critical']} Critical, {counts['high']} High, {counts['medium']} Medium, {counts['low']} Low).",
             ""
         ]
 
         if top_risks:
-            comment.append("### 🚨 Top Priority Risks")
+            comment.append("### Priority Fix Order (Top Issues)")
             for risk in top_risks:
                 comment.append(f"- {risk}")
             comment.append("")
 
         if recommended_next_steps:
-            comment.append("### 📋 Recommended Next Steps")
+            comment.append("### Recommended Next Steps")
             for step in recommended_next_steps:
                 comment.append(f"- {step}")
             comment.append("")
 
+        comment.append("### Overall Recommendation")
+        comment.append(f"Status: **{overall_status}**. Please review the suggestions above to finalize your code!")
+        comment.append("")
         comment.append("---")
-        comment.append("*Automated Code Review & Security Analysis Agent*")
+        comment.append("*Automated Senior Engineer Code Reviewer*")
 
         return "\n".join(comment)

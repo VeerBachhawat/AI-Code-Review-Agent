@@ -76,9 +76,39 @@ export const ChatAssistant: React.FC = () => {
     setLoading(true);
 
     try {
+      const cachedResultStr = localStorage.getItem('active_review_result');
+      const cachedCodeStr = localStorage.getItem('active_review_code');
+
+      let codeCtx = cachedCodeStr || undefined;
+      let findingsCtx = findingsContext || (activeFinding ? [activeFinding] : undefined);
+      let remCtx: any[] | undefined = undefined;
+      let prSumCtx: any = undefined;
+      let cqScore: number | undefined = undefined;
+      let secScore: number | undefined = undefined;
+
+      if (cachedResultStr) {
+        try {
+          const parsedRes = JSON.parse(cachedResultStr);
+          if (!findingsCtx && parsedRes.findings && parsedRes.findings.length > 0) {
+            findingsCtx = parsedRes.findings;
+          }
+          if (parsedRes.remediation) remCtx = parsedRes.remediation;
+          if (parsedRes.pr_summary) prSumCtx = parsedRes.pr_summary;
+          if (parsedRes.pr_summary?.overall_code_quality !== undefined) cqScore = parsedRes.pr_summary.overall_code_quality;
+          if (parsedRes.pr_summary?.overall_security_score !== undefined) secScore = parsedRes.pr_summary.overall_security_score;
+        } catch (e) {
+          console.error('Failed to parse cached review result for chat:', e);
+        }
+      }
+
       const response = await apiService.chat(
         textToSend,
-        findingsContext || (activeFinding ? [activeFinding] : undefined)
+        findingsCtx,
+        codeCtx,
+        remCtx,
+        prSumCtx,
+        cqScore,
+        secScore
       );
 
       const assistantMsg: Message = {

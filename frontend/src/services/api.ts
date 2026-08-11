@@ -7,14 +7,14 @@ import type {
   Finding
 } from '../types';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8001';
 
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
   headers: {
     'Content-Type': 'application/json',
   },
-  timeout: 30000,
+  timeout: 600000,
 });
 
 export const apiService = {
@@ -46,11 +46,23 @@ export const apiService = {
     return response.data;
   },
 
-  async chat(question: string, optional_findings?: Finding[], optional_code?: string): Promise<ChatResponse> {
+  async chat(
+    question: string,
+    optional_findings?: Finding[],
+    optional_code?: string,
+    remediations?: any[],
+    pr_summary?: any,
+    code_quality_score?: number,
+    security_score?: number
+  ): Promise<ChatResponse> {
     const response = await apiClient.post<ChatResponse>('/chat', {
       question,
       optional_findings,
-      optional_code
+      optional_code,
+      remediations,
+      pr_summary,
+      code_quality_score,
+      security_score
     });
     return response.data;
   },

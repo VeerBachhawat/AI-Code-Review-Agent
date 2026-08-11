@@ -94,13 +94,12 @@ export const ReviewCode: React.FC = () => {
   const [errorMsg, setErrorMsg] = useState('');
 
   const steps = [
-    'Parsing AST & Analyzing Code Maintainability...',
-    'Scanning OWASP Top 10 Security Vulnerabilities...',
-    'Generating Refactored Code Remediation Guidance...',
-    'Compiling Executive PR Review Summary...'
+    '✓ Syntax validation',
+    '✓ AST Code & Security analysis',
+    '⏳ AI Remediation generation',
+    '○ Compiling PR summary'
   ];
 
-  // Issue 2: Automatic Programming Language Detection Logic
   const detectedLanguage = useMemo(() => {
     if (filename) {
       const ext = filename.substring(filename.lastIndexOf('.')).toLowerCase();
@@ -167,7 +166,7 @@ export const ReviewCode: React.FC = () => {
 
     const interval = setInterval(() => {
       setCurrentStep((prev) => (prev < steps.length - 1 ? prev + 1 : prev));
-    }, 600);
+    }, 2500);
 
     try {
       const response = await apiService.reviewCode(code, detectedLanguage.toLowerCase());
@@ -184,8 +183,9 @@ export const ReviewCode: React.FC = () => {
           reviewResult
         );
 
-        // Store active result for Results page view
+        // Store active result and code for Results page view & Chat context
         localStorage.setItem('active_review_result', JSON.stringify(reviewResult));
+        localStorage.setItem('active_review_code', code);
 
         setLoading(false);
         navigate('/results');

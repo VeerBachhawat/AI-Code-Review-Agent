@@ -1,40 +1,138 @@
 import ast
 import math
+import re
 from collections import Counter
+from typing import List, Dict, Any
 
 
 class CodeAnalysisAgent:
 
-    def analyze(self, code: str):
+    def analyze(self, code: str) -> List[Dict[str, Any]]:
         findings = []
 
         try:
             tree = ast.parse(code)
+            findings.extend(self._detect_bad_variable_names(tree))
+            findings.extend(self._detect_long_methods(tree, code))
+            findings.extend(self._detect_too_many_parameters(tree))
+            findings.extend(self._detect_deep_nesting(tree))
+            findings.extend(self._detect_large_classes(tree))
+            findings.extend(self._detect_cyclomatic_complexity(tree))
+            findings.extend(self._detect_duplicate_code(tree, code))
+            findings.extend(self._detect_unused_variables(tree))
+            findings.extend(self._detect_unused_imports(tree))
+            findings.extend(self._detect_magic_numbers(tree))
+            findings.extend(self._calculate_maintainability_score(tree, code))
         except SyntaxError:
-            return [{
-                "agent": "Code Analysis",
-                "severity": "Critical",
-                "issue": "Syntax Error",
-                "explanation": "The code contains syntax errors and could not be parsed.",
-                "line": 0
-            }]
+            # Non-Python code or syntax error: fallback to line-by-line pattern scanning
+            findings.extend(self._detect_pattern_quality_issues(code))
 
-        # ----------------------------
-        # Run Rule Detections
-        # ----------------------------
-        findings.extend(self._detect_bad_variable_names(tree))
-        findings.extend(self._detect_long_methods(tree, code))
-        findings.extend(self._detect_too_many_parameters(tree))
-        findings.extend(self._detect_deep_nesting(tree))
-        findings.extend(self._detect_large_classes(tree))
-        findings.extend(self._detect_cyclomatic_complexity(tree))
-        findings.extend(self._detect_duplicate_code(tree, code))
-        findings.extend(self._detect_unused_variables(tree))
-        findings.extend(self._detect_unused_imports(tree))
-        findings.extend(self._detect_magic_numbers(tree))
-        findings.extend(self._calculate_maintainability_score(tree, code))
+        # Always check for console debug statements across Python, Java, JS, C++, etc.
+        console_findings = self._detect_console_statements(code)
+        findings.extend(console_findings)
+
+        # Standardize and consolidate repetitive code quality findings
+        consolidated = self._consolidate_findings(findings)
+        return consolidated
+
+    def _detect_console_statements(self, code: str) -> List[Dict[str, Any]]:
+        findings = []
+        lines = code.split("\n")
+        for i, line in enumerate(lines, start=1):
+            line_str = line.strip()
+            if "System.out.print" in line_str or "System.err.print" in line_str or "console.log(" in line_str or "console.debug(" in line_str:
+                findings.append({
+                    "id": f"cq_console_{i}",
+                    "title": "Console Debug Statement",
+                    "issue": "Console Debug Statement",
+                    "category": "Code Quality",
+                    "agent": "CodeAnalysisAgent",
+                    "severity": "Low",
+                    "confidence": 0.99,
+                    "line": i,
+                    "explanation": f"Print or console debug statement on line {i}. Use a structured logging framework (e.g. SLF4J / Logback) instead.",
+                    "why_it_matters": "Direct console logging can degrade performance and leak sensitive internal details to standard output streams.",
+                    "recommendation": "Replace System.out/console.log with a configurable logger (e.g., Logger.getLogger() or SLF4J LoggerFactory).",
+                    "secure_code": "logger.info(...) or logger.debug(...)",
+                    "references": ["Clean Code - Logging Best Practices"]
+                })
+        return findings
+
+    def _detect_pattern_quality_issues(self, code: str) -> List[Dict[str, Any]]:
+        findings = []
+        lines = code.split("\n")
+
+        if len(lines) > 250:
+            findings.append({
+                "id": "cq_file_length",
+                "title": "File Length Exceeds Recommended Limit",
+                "issue": "File Length Exceeds Threshold",
+                "category": "Code Quality",
+                "agent": "CodeAnalysisAgent",
+                "severity": "Low",
+                "confidence": 0.90,
+                "line": 1,
+                "explanation": f"File contains {len(lines)} lines, exceeding the recommended limit of 250 lines.",
+                "why_it_matters": "Large files are difficult to maintain, test, and review effectively.",
+                "recommendation": "Split the file into smaller, modular components.",
+                "secure_code": "// Break monolithic file into distinct module classes",
+                "references": ["Single Responsibility Principle"]
+            })
 
         return findings
+
+    def _consolidate_findings(self, findings: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Consolidates repetitive findings (such as multiple System.out.print statements) into single aggregated items.
+        """
+        console_lines = []
+        other_findings = []
+
+        for f in findings:
+            issue_title = str(f.get("issue", "")).lower()
+            if "console" in issue_title or "system.out" in issue_title or "print statement" in issue_title:
+                line_no = f.get("line", 1)
+                if line_no not in console_lines:
+                    console_lines.append(line_no)
+            else:
+                other_findings.append(f)
+
+        if console_lines:
+            console_lines.sort()
+            lines_str = ", ".join(map(str, console_lines))
+            consolidated_console = {
+                "id": "cq_console_consolidated",
+                "title": "Multiple Console Output Statements Detected",
+                "issue": "Console Debug Statement",
+                "category": "Code Quality",
+                "agent": "CodeAnalysisAgent",
+                "severity": "Low",
+                "confidence": 0.99,
+                "line": console_lines[0],
+                "affected_lines": console_lines,
+                "explanation": f"Detected {len(console_lines)} console output statements (System.out.print / console.log) on lines {lines_str}. Use a structured logging framework.",
+                "why_it_matters": "Direct console output bypasses log level controls, reduces performance in production, and can leak sensitive information.",
+                "recommendation": "Replace standard print statements with SLF4J / Logback / java.util.logging logger calls.",
+                "secure_code": "private static final Logger logger = LoggerFactory.getLogger(YourClass.class);\nlogger.info(\"Message\");",
+                "references": ["OWASP Logging Guide", "Clean Code: Logging Standards"]
+            }
+            other_findings.append(consolidated_console)
+
+        # Standardize all findings to include required schema keys
+        result = []
+        for i, f in enumerate(other_findings, start=1):
+            item = dict(f)
+            item.setdefault("id", f"cq_{i}")
+            item.setdefault("title", item.get("issue", "Code Quality Finding"))
+            item.setdefault("category", "Code Quality")
+            item.setdefault("agent", "CodeAnalysisAgent")
+            item.setdefault("severity", "Low")
+            item.setdefault("confidence", 0.90)
+            item.setdefault("line", 1)
+            item.setdefault("references", ["Clean Code Best Practices"])
+            result.append(item)
+
+        return result
 
     def get_depth(self, node):
         max_depth = 0

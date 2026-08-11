@@ -1,5 +1,21 @@
 import ast
+import logging
+import os
+import sys
 from typing import Any, Dict, List, Optional
+from dotenv import load_dotenv
+
+root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+env_path = os.path.join(root_dir, ".env")
+load_dotenv(dotenv_path=env_path)
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("SentinelAI")
+
+ollama_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1/")
+ollama_model = os.getenv("OLLAMA_MODEL", "qwen3:8b")
+logger.info(f"[OLLAMA CONFIG] Provider: Ollama | Model: {ollama_model} | Base URL: {ollama_url}")
+
 from fastapi import FastAPI, File, UploadFile, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -7,14 +23,11 @@ from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from pydantic import BaseModel
 
-try:
-    from agents.orchestrator import Orchestrator
-    from agents.conversational_code_assistant import ConversationalCodeAssistant
-    from agents.remediation_agent import RemediationAgent
-except ImportError:
-    from backend.agents.orchestrator import Orchestrator
-    from backend.agents.conversational_code_assistant import ConversationalCodeAssistant
-    from backend.agents.remediation_agent import RemediationAgent
+from backend.agents.orchestrator import Orchestrator
+from backend.agents.conversational_code_assistant import ConversationalCodeAssistant
+from backend.agents.remediation_agent import RemediationAgent
+from backend.agents.pr_summary_agent import PRSummaryAgent
+from backend.llm.ollama_service import ollama_service
 
 app = FastAPI(
     title="AI Code Review Agent",
@@ -66,6 +79,7 @@ async def generic_exception_handler(request: Request, exc: Exception):
 orchestrator = Orchestrator()
 assistant = ConversationalCodeAssistant()
 remediation_agent = RemediationAgent()
+pr_summary_agent = PRSummaryAgent()
 
 
 # Helper for non-python review responses
@@ -76,25 +90,14 @@ def _build_review_payload(language: str, findings: List[Dict[str, Any]], code: s
     medium_count = sum(1 for f in findings if str(f.get("severity", "")).lower() == "medium")
     low_count = sum(1 for f in findings if str(f.get("severity", "")).lower() == "low")
 
-    status_text = "Approved" if total_findings == 0 else ("Needs Changes" if (critical_count + high_count) > 0 else "Approved with Suggestions")
-
-    remediations = []
-    for f in findings:
-        remediations.append({
-            "issue": f.get("issue", "Issue"),
-            "severity": f.get("severity", "Low"),
-            "line": f.get("line", 1),
-            "why_it_is_problematic": f.get("explanation", "Potential risk or code quality flaw."),
-            "recommended_fix": "Refactor code to follow standard language conventions.",
-            "corrected_code_example": "// Follow standard language practices",
-            "best_practice": "Follow OWASP and standard language guidelines.",
-            "references": ["Security Guidelines"]
-        })
+    # Generate dynamic LLM remediations and PR summary via Ollama Service
+    remediations = remediation_agent.generate_remediation(findings, source_code=code)
+    pr_summary = pr_summary_agent.generate_summary(findings, remediations)
 
     payload = {
         "status": "success",
-        "language": language,
-        "execution_time_ms": 15,
+        "language": language.lower(),
+        "execution_time_ms": 120,
         "summary": {
             "total_findings": total_findings,
             "critical": critical_count,
@@ -103,34 +106,14 @@ def _build_review_payload(language: str, findings: List[Dict[str, Any]], code: s
             "low": low_count,
             "agent_status": {
                 "CodeAnalysisAgent": "success",
-                "SecurityAgent": "success"
+                "SecurityAgent": "success",
+                "RemediationAgent": "success",
+                "PRSummaryAgent": "success"
             }
         },
         "findings": findings,
         "remediation": remediations,
-        "pr_summary": {
-            "overall_status": status_text,
-            "overall_code_quality": max(60, 100 - (total_findings * 10)),
-            "overall_security_score": max(50, 100 - (critical_count * 25 + high_count * 15)),
-            "summary": {
-                "total_findings": total_findings,
-                "critical": critical_count,
-                "high": high_count,
-                "medium": medium_count,
-                "low": low_count
-            },
-            "top_risks": [f.get("issue", "") for f in findings if str(f.get("severity", "")).lower() in ["critical", "high"]],
-            "code_quality_summary": f"Completed static check for {language}. Found {total_findings} items.",
-            "security_summary": f"Security analysis complete for {language}.",
-            "positive_observations": [f"Source code structure parsed for {language}."],
-            "recommended_next_steps": ["Review identified findings.", "Ensure unit tests cover edge cases."],
-            "estimated_remediation_effort": {
-                "critical": "0 hours" if critical_count == 0 else "1-2 hours",
-                "high": "0 hours" if high_count == 0 else "1 hour",
-                "overall": "Low effort" if total_findings < 3 else "Moderate effort"
-            },
-            "developer_comment": f"Automated review completed for {language}."
-        }
+        "pr_summary": pr_summary
     }
 
     result = dict(payload)
@@ -145,19 +128,57 @@ class CodeInput(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    question: str
+    question: Any
     optional_findings: Optional[List[Dict[str, Any]]] = None
     optional_code: Optional[str] = None
+    remediations: Optional[List[Dict[str, Any]]] = None
+    pr_summary: Optional[Dict[str, Any]] = None
+    code_quality_score: Optional[int] = None
+    security_score: Optional[int] = None
 
 
 class FindingRequest(BaseModel):
     finding: Dict[str, Any]
+    code: Optional[str] = None
+    findings: Optional[List[Dict[str, Any]]] = None
+    remediations: Optional[List[Dict[str, Any]]] = None
+    pr_summary: Optional[Dict[str, Any]] = None
+    code_quality_score: Optional[int] = None
+    security_score: Optional[int] = None
 
 
 # Existing Endpoints (Preserved)
 @app.get("/")
 def home():
     return {"message": "AI Code Review Agent Backend is Running!"}
+
+
+@app.get("/health")
+def health_check():
+    return {
+        "status": "healthy",
+        "service": "SentinelAI API",
+        "ollama_configured": True,
+        "model": os.getenv("OLLAMA_MODEL", "qwen3:8b")
+    }
+
+
+@app.get("/health/ollama")
+@app.get("/health/groq")
+def ollama_health():
+    """
+    Health check endpoint to test Ollama LLM API connectivity and configuration.
+    """
+    try:
+        return ollama_service.health_check()
+    except Exception as e:
+        logger.exception("[OLLAMA HEALTH ERROR] Ollama API check failed")
+        return {
+            "provider": "ollama",
+            "status": "error",
+            "error_type": type(e).__name__,
+            "message": f"Failed to connect to Ollama API: {str(e)}"
+        }
 
 
 @app.post("/submit-code")
@@ -237,61 +258,53 @@ def review_code(data: CodeInput):
     lang = data.language.lower().strip()
 
     if lang == "python":
-        result = orchestrator.review(data.code)
+        result = orchestrator.review(data.code, language="python")
         output = dict(result)
         output["status"] = "success"
         output["language"] = "python"
         output["review"] = result
         return output
 
-    elif lang == "java":
-        java_findings = []
+    else:
+        lang_findings = []
         lines = data.code.split("\n")
 
         for i, line in enumerate(lines, start=1):
-            if "System.out.print" in line:
-                java_findings.append({
+            line_str = line.strip()
+            # General Security & Quality Pattern Scans for Non-Python languages
+            if "System.out.print" in line_str or "console.log" in line_str:
+                lang_findings.append({
                     "agent": "CodeAnalysisAgent",
                     "severity": "Low",
-                    "issue": "Console Print Statement",
-                    "explanation": "System.out print statement detected. Use structured logging framework (e.g. SLF4J, Log4j).",
+                    "issue": "Console Debug Statement",
+                    "explanation": f"Print or console statement detected in line {i}. Use a structured logging framework.",
                     "line": i
                 })
-            if "Runtime.getRuntime().exec" in line or "ProcessBuilder" in line:
-                java_findings.append({
+            if "Runtime.getRuntime().exec" in line_str or "ProcessBuilder" in line_str or "child_process" in line_str or "system(" in line_str:
+                lang_findings.append({
                     "agent": "SecurityAgent",
                     "severity": "High",
                     "issue": "Command Execution Risk",
-                    "explanation": "Executing shell commands via Runtime or ProcessBuilder can lead to Command Injection.",
+                    "explanation": f"Executing system commands dynamically on line {i} can allow Command Injection.",
                     "line": i
                 })
-            if "eval(" in line or "ScriptEngine" in line:
-                java_findings.append({
+            if "eval(" in line_str or "ScriptEngine" in line_str or "innerHTML" in line_str:
+                lang_findings.append({
                     "agent": "SecurityAgent",
                     "severity": "Critical",
-                    "issue": "Dynamic Code Evaluation",
-                    "explanation": "Dynamic script evaluation can allow arbitrary code execution.",
+                    "issue": "Dynamic Execution / Unescaped Render Risk",
+                    "explanation": f"Dynamic execution or raw rendering on line {i} exposes the application to code injection or XSS.",
+                    "line": i
+                })
+            if "strcpy(" in line_str or "gets(" in line_str:
+                lang_findings.append({
+                    "agent": "SecurityAgent",
+                    "severity": "Critical",
+                    "issue": "Unsafe Memory Function",
+                    "explanation": f"Unsafe string function detected on line {i}. Can lead to buffer overflow.",
                     "line": i
                 })
 
-        try:
-            import javalang
-            javalang.parse.parse(data.code)
-        except ImportError:
-            pass
-        except Exception as e:
-            java_findings.append({
-                "agent": "CodeAnalysisAgent",
-                "severity": "Medium",
-                "issue": "Java Syntax Warning",
-                "explanation": f"Possible Java syntax issue: {str(e)}",
-                "line": 1
-            })
-
-        return _build_review_payload("Java", java_findings, data.code)
-
-    else:
-        # C++, JavaScript, TypeScript, etc.
         formatted_lang = data.language.capitalize()
         if lang in ["js", "javascript"]:
             formatted_lang = "JavaScript"
@@ -300,7 +313,7 @@ def review_code(data: CodeInput):
         elif lang in ["cpp", "c++"]:
             formatted_lang = "C++"
 
-        return _build_review_payload(formatted_lang, [], data.code)
+        return _build_review_payload(formatted_lang, lang_findings, data.code)
 
 
 # Conversational & Remediation Endpoints
@@ -315,7 +328,11 @@ def chat(request: ChatRequest):
         response = assistant.ask(
             question=request.question,
             optional_findings=request.optional_findings,
-            optional_code=request.optional_code
+            optional_code=request.optional_code,
+            remediations=request.remediations,
+            pr_summary=request.pr_summary,
+            code_quality_score=request.code_quality_score,
+            security_score=request.security_score
         )
         return response
     except Exception as e:
@@ -341,7 +358,15 @@ def explain_finding(request: FindingRequest):
         line = finding.get("line", 0)
 
         prompt = f"Explain this finding on line {line}: {issue}. Details: {explanation_text}"
-        response = assistant.ask(question=prompt, optional_findings=[finding])
+        response = assistant.ask(
+            question=prompt,
+            optional_findings=request.findings or [finding],
+            optional_code=request.code,
+            remediations=request.remediations,
+            pr_summary=request.pr_summary,
+            code_quality_score=request.code_quality_score,
+            security_score=request.security_score
+        )
 
         return {
             "status": "success",
@@ -369,13 +394,22 @@ def ask_remediation(request: FindingRequest):
         issue = finding.get("issue", "Finding Issue")
         line = finding.get("line", 0)
 
-        # 1. Generate Remediation from RemediationAgent
-        remediations = remediation_agent.generate_remediation([finding])
+        remediations = remediation_agent.generate_remediation(
+            findings=request.findings or [finding],
+            source_code=request.code or ""
+        )
         remediation = remediations[0] if remediations else {}
 
-        # 2. Generate Conversational Explanation from ConversationalCodeAssistant
         prompt = f"How should I fix this vulnerability on line {line}: {issue}?"
-        chat_response = assistant.ask(question=prompt, optional_findings=[finding])
+        chat_response = assistant.ask(
+            question=prompt,
+            optional_findings=request.findings or [finding],
+            optional_code=request.code,
+            remediations=request.remediations or remediations,
+            pr_summary=request.pr_summary,
+            code_quality_score=request.code_quality_score,
+            security_score=request.security_score
+        )
 
         return {
             "status": "success",

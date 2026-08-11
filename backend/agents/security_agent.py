@@ -1,48 +1,199 @@
 import ast
 import re
+from typing import List, Dict, Any
 
 
 class SecurityAgent:
 
-    def analyze(self, code: str):
+    def analyze(self, code: str) -> List[Dict[str, Any]]:
         findings = []
 
+        # 1. Attempt Python AST parsing if applicable
         try:
             tree = ast.parse(code)
+            findings.extend(self._detect_eval_and_exec(tree))
+            findings.extend(self._detect_hardcoded_secrets(tree))
+            findings.extend(self._detect_sql_injection(tree))
+            findings.extend(self._detect_xss(tree))
+            findings.extend(self._detect_broken_auth(tree))
+            findings.extend(self._detect_broken_access_control(tree))
+            findings.extend(self._detect_path_traversal(tree))
+            findings.extend(self._detect_command_injection(tree))
+            findings.extend(self._detect_insecure_deserialization(tree))
+            findings.extend(self._detect_weak_cryptography(tree))
+            findings.extend(self._detect_ssrf(tree))
         except SyntaxError:
-            return [{
-                "agent": "Security",
-                "severity": "Critical",
-                "issue": "Syntax Error",
-                "explanation": "The code contains syntax errors and could not be parsed.",
-                "line": 0
-            }]
+            pass
 
-        # ----------------------------
-        # Run Rule Detections
-        # ----------------------------
-        findings.extend(self._detect_eval_and_exec(tree))
-        findings.extend(self._detect_hardcoded_secrets(tree))
-        findings.extend(self._detect_sql_injection(tree))
-        findings.extend(self._detect_xss(tree))
-        findings.extend(self._detect_broken_auth(tree))
-        findings.extend(self._detect_broken_access_control(tree))
-        findings.extend(self._detect_path_traversal(tree))
-        findings.extend(self._detect_command_injection(tree))
-        findings.extend(self._detect_insecure_deserialization(tree))
-        findings.extend(self._detect_weak_cryptography(tree))
-        findings.extend(self._detect_ssrf(tree))
+        # 2. Run Multi-Language Pattern Detectors (Java, JS, C++, Go, PHP, Python)
+        pattern_findings = self._detect_pattern_security_vulnerabilities(code)
+        findings.extend(pattern_findings)
 
-        # Deduplicate findings by line and issue
+        # Standardize and deduplicate findings
         unique_findings = []
         seen = set()
-        for finding in findings:
-            key = (finding["line"], finding["issue"])
+        for idx, finding in enumerate(findings, start=1):
+            key = (finding.get("line", 1), finding.get("issue", ""))
             if key not in seen:
                 seen.add(key)
-                unique_findings.append(finding)
+                item = dict(finding)
+                item.setdefault("id", f"sec_{idx}")
+                item.setdefault("title", item.get("issue", "Security Vulnerability"))
+                item.setdefault("category", "Security")
+                item.setdefault("agent", "SecurityAgent")
+                item.setdefault("severity", "High")
+                item.setdefault("confidence", 0.95)
+                item.setdefault("line", 1)
+                item.setdefault("references", ["OWASP Top 10 Security Guidance"])
+                unique_findings.append(item)
 
         return unique_findings
+
+    def _detect_pattern_security_vulnerabilities(self, code: str) -> List[Dict[str, Any]]:
+        findings = []
+        lines = code.split("\n")
+
+        for i, line in enumerate(lines, start=1):
+            line_str = line.strip()
+
+            # --- 1. SQL Injection ---
+            if (
+                ("Statement" in line_str and "conn.createStatement" in line_str) or
+                ("executeQuery(" in line_str and "+" in line_str) or
+                ("executeUpdate(" in line_str and "+" in line_str) or
+                (re.search(r'SELECT\s+.*FROM\s+.*\+', line_str, re.IGNORECASE)) or
+                (re.search(r'INSERT\s+INTO\s+.*\+', line_str, re.IGNORECASE)) or
+                (re.search(r'UPDATE\s+.*SET\s+.*\+', line_str, re.IGNORECASE)) or
+                (re.search(r'DELETE\s+FROM\s+.*\+', line_str, re.IGNORECASE))
+            ):
+                findings.append({
+                    "id": f"sec_sqli_{i}",
+                    "title": "SQL Injection Vulnerability",
+                    "issue": "SQL Injection",
+                    "category": "Security",
+                    "agent": "SecurityAgent",
+                    "severity": "Critical",
+                    "confidence": 0.95,
+                    "line": i,
+                    "explanation": f"SQL query string dynamically concatenated on line {i}. Attackers can alter query logic to bypass authentication or extract sensitive data.",
+                    "why_it_matters": "SQL injection permits unauthorized database queries, data leakage, data destruction, or complete database administrative override.",
+                    "recommendation": "Use parameterized queries (e.g. PreparedStatement in Java, parameterized tuples in Python/Node) instead of string concatenation.",
+                    "secure_code": "PreparedStatement ps = conn.prepareStatement(\"SELECT * FROM users WHERE username = ?\");\nps.setString(1, username);",
+                    "references": ["OWASP Top 10: A03:2021 - Injection", "CWE-89: Improper Neutralization of Special Elements used in an SQL Command"]
+                })
+
+            # --- 2. Command Injection ---
+            if (
+                "Runtime.getRuntime().exec(" in line_str or
+                "ProcessBuilder(" in line_str or
+                ("exec(" in line_str and "child_process" in line_str) or
+                "execSync(" in line_str or
+                re.search(r'system\s*\(\s*["\'].*\+', line_str)
+            ):
+                findings.append({
+                    "id": f"sec_cmdi_{i}",
+                    "title": "Command Injection Risk",
+                    "issue": "Command Injection",
+                    "category": "Security",
+                    "agent": "SecurityAgent",
+                    "severity": "Critical",
+                    "confidence": 0.95,
+                    "line": i,
+                    "explanation": f"Executing operating system commands dynamically on line {i} exposes the application to Command Injection.",
+                    "why_it_matters": "Attackers can supply command separators (e.g., ';' or '&&') to execute arbitrary operating system commands with server privileges.",
+                    "recommendation": "Avoid direct system command calls or pass strictly validated argument lists without subshell invocation.",
+                    "secure_code": "ProcessBuilder pb = new ProcessBuilder(\"ping\", \"-c\", \"4\", safeHost);\nProcess p = pb.start();",
+                    "references": ["OWASP Top 10: A03:2021 - Injection", "CWE-78: OS Command Injection"]
+                })
+
+            # --- 3. Unsafe Deserialization ---
+            if (
+                "ObjectInputStream" in line_str and "readObject" in line_str or
+                "XMLDecoder" in line_str or
+                "unserialize(" in line_str
+            ):
+                findings.append({
+                    "id": f"sec_deser_{i}",
+                    "title": "Unsafe Object Deserialization",
+                    "issue": "Unsafe Deserialization",
+                    "category": "Security",
+                    "agent": "SecurityAgent",
+                    "severity": "Critical",
+                    "confidence": 0.95,
+                    "line": i,
+                    "explanation": f"Unsafe object deserialization detected on line {i}. Deserializing untrusted binary streams allows Remote Code Execution (RCE).",
+                    "why_it_matters": "Malicious serialized payloads execute object constructor/readObject methods automatically upon deserialization.",
+                    "recommendation": "Use safe data exchange formats like JSON/Protocol Buffers or implement object filtering (e.g. ValidatingObjectInputStream).",
+                    "secure_code": "ObjectMapper mapper = new ObjectMapper();\nMyClass obj = mapper.readValue(jsonString, MyClass.class);",
+                    "references": ["OWASP Top 10: A08:2021 - Software and Data Integrity Failures", "CWE-502: Deserialization of Untrusted Data"]
+                })
+
+            # --- 4. Hardcoded Credentials / Passwords ---
+            if (
+                re.search(r'(DB_PASSWORD|DB_PASS|PASSWORD|SECRET_KEY|API_KEY|AUTH_TOKEN)\s*=\s*["\'][^"\']+["\']', line_str, re.IGNORECASE) or
+                re.search(r'private\s+static\s+final\s+String\s+.*PASSWORD.*\s*=\s*["\'][^"\']+["\']', line_str, re.IGNORECASE)
+            ):
+                findings.append({
+                    "id": f"sec_secret_{i}",
+                    "title": "Hardcoded Credential Exposure",
+                    "issue": "Hardcoded Database Credentials",
+                    "category": "Security",
+                    "agent": "SecurityAgent",
+                    "severity": "High",
+                    "confidence": 0.90,
+                    "line": i,
+                    "explanation": f"Hardcoded password or secret key detected on line {i}. Credentials should never be embedded in source code.",
+                    "why_it_matters": "Source code repository leaks expose credentials to all developers, CI/CD systems, and potential external breach vectors.",
+                    "recommendation": "Fetch credentials at runtime from environment variables or a secure key management system.",
+                    "secure_code": "String dbPassword = System.getenv(\"DB_PASSWORD\");",
+                    "references": ["OWASP Top 10: A07:2021 - Identification and Authentication Failures", "CWE-798: Use of Hard-coded Credentials"]
+                })
+
+            # --- 5. Path Traversal ---
+            if (
+                re.search(r'new\s+File\s*\([^)]*\+', line_str) or
+                re.search(r'new\s+FileInputStream\s*\([^)]*\+', line_str) or
+                re.search(r'Paths\.get\s*\([^)]*\+', line_str)
+            ):
+                findings.append({
+                    "id": f"sec_path_{i}",
+                    "title": "Path Traversal Vulnerability",
+                    "issue": "Path Traversal",
+                    "category": "Security",
+                    "agent": "SecurityAgent",
+                    "severity": "High",
+                    "confidence": 0.90,
+                    "line": i,
+                    "explanation": f"Dynamic file path construction detected on line {i} using unvalidated parameters.",
+                    "why_it_matters": "Attackers can inject directory traversal sequences ('../') to read or overwrite system files outside the target directory.",
+                    "recommendation": "Normalize paths and verify target files stay strictly within permitted base directories.",
+                    "secure_code": "Path basePath = Paths.get(\"/safe/dir\");\nPath targetPath = basePath.resolve(userInput).normalize();\nif (!targetPath.startsWith(basePath)) throw new SecurityException();",
+                    "references": ["OWASP Top 10: A01:2021 - Broken Access Control", "CWE-22: Path Traversal"]
+                })
+
+            # --- 6. Insecure Cryptography / Weak Random ---
+            if (
+                re.search(r'MessageDigest\.getInstance\s*\(\s*["\'](MD5|SHA-1)["\']\)', line_str, re.IGNORECASE) or
+                re.search(r'Cipher\.getInstance\s*\(\s*["\']DES["\']\)', line_str, re.IGNORECASE) or
+                re.search(r'new\s+Random\s*\(', line_str)
+            ):
+                findings.append({
+                    "id": f"sec_crypto_{i}",
+                    "title": "Insecure Cryptography / Weak Randomness",
+                    "issue": "Weak Cryptography",
+                    "category": "Security",
+                    "agent": "SecurityAgent",
+                    "severity": "Medium",
+                    "confidence": 0.85,
+                    "line": i,
+                    "explanation": f"Insecure cryptographic algorithm or pseudo-random generator on line {i}.",
+                    "why_it_matters": "Weak algorithms (MD5, SHA-1, DES) or java.util.Random are vulnerable to collision attacks and predictability in security tokens.",
+                    "recommendation": "Use SHA-256/SHA-512 for hashes and java.security.SecureRandom for cryptographic token generation.",
+                    "secure_code": "MessageDigest md = MessageDigest.getInstance(\"SHA-256\");\nSecureRandom random = new SecureRandom();",
+                    "references": ["OWASP Top 10: A02:2021 - Cryptographic Failures", "CWE-327: Use of a Broken or Risky Cryptographic Algorithm"]
+                })
+
+        return findings
 
     # --------------------------------------------------------------------------
     # Detection Rules Implementation

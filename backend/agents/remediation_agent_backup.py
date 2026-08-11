@@ -3,7 +3,13 @@ import re
 import logging
 from typing import List, Dict, Any, Union
 
-from backend.llm.ollama_service import ollama_service
+try:
+    from llm.grok_client import get_grok_client
+except ImportError:
+    try:
+        from backend.llm.grok_client import get_grok_client
+    except ImportError:
+        get_grok_client = None
 
 logger = logging.getLogger(__name__)
 
@@ -12,11 +18,11 @@ class RemediationAgent:
     """
     Remediation Agent that receives findings from CodeAnalysisAgent and SecurityAgent
     and produces structured, beginner-friendly remediation guidance and secure code examples.
-    Uses Ollama LLM (qwen3:8b) for dynamic, contextual remediations.
+    Uses xAI Grok for dynamic, contextual remediations with automatic fallback to rule-based templates.
     """
 
     def __init__(self):
-        # Register mapping-based rules (Pattern -> Handler) for explicit offline utility if requested
+        # Register mapping-based rules (Pattern -> Handler) for rule-based fallback
         self._rules = [
             # Security Vulnerabilities
             (re.compile(r"sql injection", re.IGNORECASE), self._remediate_sql_injection),
@@ -47,9 +53,8 @@ class RemediationAgent:
 
     def generate_remediation(self, findings: Union[str, List[Dict[str, Any]]], source_code: str = "") -> List[Dict[str, Any]]:
         """
-        Receives a list of findings and optional source_code, and returns structured
-        remediation guidance. Uses ONE single batch Ollama LLM request for maximum speed,
-        falling back to rule-based remediations if Ollama fails.
+        Receives a list (or JSON string) of findings and optional source_code string,
+        and returns structured remediation guidance for each using Grok LLM (with fallback to rules).
         """
         if isinstance(findings, str):
             try:
@@ -57,51 +62,13 @@ class RemediationAgent:
             except Exception:
                 findings = []
 
-        if not isinstance(findings, list) or not findings:
+        if not isinstance(findings, list):
             return []
-
-        enriched_findings = []
-        for index, finding in enumerate(findings):
-            if isinstance(finding, dict):
-                f_enriched = self._enrich_finding_with_code(finding, source_code)
-                f_enriched["_batch_id"] = index + 1
-                enriched_findings.append(f_enriched)
-
-        if not enriched_findings:
-            return []
-
-        # 1. Attempt ONE single batch Ollama LLM call
-        batch_results = {}
-        try:
-            batch_results = self._ollama_remediate_batch(enriched_findings)
-        except Exception as e:
-            logger.warning(f"[REMEDIATION BATCH FALLBACK] Batch Ollama call failed ({str(e)}). Falling back to rule-based remediations.")
 
         remediations = []
-        for enriched in enriched_findings:
-            issue_text = enriched.get("issue", "")
-            batch_id = enriched.get("_batch_id")
-
-            details = batch_results.get(batch_id)
-            if not details or not isinstance(details, dict) or not details.get("why_it_is_problematic"):
-                # Fallback to rule-based handler for this finding
-                handler = self._find_handler(issue_text)
-                details = handler(enriched)
-
-            remediations.append({
-                "issue": issue_text,
-                "severity": enriched.get("severity", "Low"),
-                "line": enriched.get("line", 1),
-                "exact_source_line": enriched.get("exact_source_line", ""),
-                "previous_line": enriched.get("previous_line", ""),
-                "next_line": enriched.get("next_line", ""),
-                "offending_code_snippet": enriched.get("offending_code_snippet", ""),
-                "why_it_is_problematic": details.get("why_it_is_problematic", ""),
-                "recommended_fix": details.get("recommended_fix", ""),
-                "corrected_code_example": details.get("corrected_code_example", ""),
-                "best_practice": details.get("best_practice", ""),
-                "references": details.get("references", []) if isinstance(details.get("references"), list) else [str(details.get("references", ""))]
-            })
+        for finding in findings:
+            if isinstance(finding, dict):
+                remediations.append(self._process_finding(finding, source_code=source_code))
 
         return remediations
 
@@ -154,77 +121,138 @@ class RemediationAgent:
 
         return f_copy
 
-    def _ollama_remediate_batch(self, enriched_findings: List[dict]) -> Dict[int, dict]:
+    def _process_finding(self, finding: dict, source_code: str = "") -> dict:
+        issue_text = finding.get("issue", "")
+        explanation_text = finding.get("explanation", "")
+
+        enriched = self._enrich_finding_with_code(finding, source_code)
+
+        # 1. Attempt Grok LLM Remediation
+        try:
+            details = self._grok_remediate(enriched, source_code=source_code)
+        except Exception as e:
+            logger.warning(f"Grok LLM remediation failed ({str(e)}). Falling back to rule-based templates.")
+            combined_text = f"{issue_text} {explanation_text}"
+            handler = self._find_handler(combined_text)
+            details = handler(enriched)
+
+        return {
+            "issue": issue_text,
+            "severity": finding.get("severity", "Low"),
+            "line": enriched.get("line", 1),
+            "exact_source_line": enriched.get("exact_source_line", ""),
+            "previous_line": enriched.get("previous_line", ""),
+            "next_line": enriched.get("next_line", ""),
+            "offending_code_snippet": enriched.get("offending_code_snippet", ""),
+            "why_it_is_problematic": details["why_it_is_problematic"],
+            "recommended_fix": details["recommended_fix"],
+            "corrected_code_example": details["corrected_code_example"],
+            "best_practice": details["best_practice"],
+            "references": details["references"]
+        }
+
+    def _grok_remediate(self, finding: dict, source_code: str = "") -> dict:
         """
-        Sends ALL findings in ONE SINGLE compact batch request to Ollama.
-        Returns a dictionary mapping finding _batch_id -> remediation details.
+        Calls xAI Grok LLM to generate clear, mentor-style remediation guidance.
         """
-        if ollama_service is None:
-            raise RuntimeError("Ollama service module unavailable.")
+        if get_grok_client is None:
+            raise RuntimeError("Grok client module unavailable.")
 
-        compact_list = []
-        for f in enriched_findings[:5]:
-            compact_list.append({
-                "id": f.get("_batch_id"),
-                "issue": f.get("issue", ""),
-                "severity": f.get("severity", "Medium"),
-                "line": f.get("line", 1),
-                "code": f.get("exact_source_line", ""),
-            })
+        client = get_grok_client()
 
-        prompt = f"""Generate short secure remediations for these code findings:
-{json.dumps(compact_list, indent=2)}
+        issue_text = finding.get("issue", "")
+        explanation_text = finding.get("explanation", "")
+        severity = finding.get("severity", "Medium")
+        line = finding.get("line", 1)
 
-Return ONLY JSON with a "remediations" array containing objects with these exact keys:
-- "id": integer finding id
-- "why_it_is_problematic": short 1-sentence risk explanation
-- "recommended_fix": short 1-sentence fix instruction
-- "corrected_code_example": single line secure code snippet replacement (use SINGLE QUOTES ONLY for strings in python snippet)
-- "best_practice": short 1-sentence rule
-- "references": array with 1 reference link string
+        code_lines = source_code.split("\n") if source_code else []
+        numbered_code = "\n".join([f"{i+1:3d} | {l}" for i, l in enumerate(code_lines)]) if source_code else "None provided."
 
-CRITICAL: Use single quotes for any internal string values inside code snippets. Do NOT use double quotes inside JSON values.
+        snippet = finding.get("offending_code_snippet", "")
+        exact_line = finding.get("exact_source_line", "")
+        current_display = exact_line if exact_line else "# Offending source line"
 
-Example format:
+        prompt = f"""You are a friendly senior software engineer and mentor reviewing code submitted by a student or junior developer.
+
+CRITICAL REQUIREMENT:
+DO NOT output generic placeholders such as `# Fixed python snippet`, `# Example code line`, `# Refactored secure implementation`, or generic placeholders.
+When providing 'corrected_code_example', output the REAL, fully working code replacement for the exact source line below.
+
+Finding Details:
+- Issue: {issue_text}
+- Severity: {severity}
+- Line Number: {line}
+- Explanation: {explanation_text}
+
+Submitted Source Code Context:
+```python
+{numbered_code}
+```
+
+Offending Code Snippet Window:
+```python
+{snippet}
+```
+
+Exact Source Line (Line {line}):
+`{exact_line}`
+
+Please structure your response fields carefully:
+
+1. "why_it_is_problematic": Formatted markdown containing:
+## Problem
+[Explain the issue in ONE simple sentence]
+
+## Why it Matters
+[Explain why this issue is dangerous or bad practice using simple English]
+
+## Severity
+[Explain in plain terms why this issue is rated as {severity} severity]
+
+2. "recommended_fix": Formatted markdown containing:
+## How to Fix
+[Provide clear, step-by-step instructions on how to solve the issue]
+
+3. "corrected_code_example": Formatted code containing:
+## Corrected Code
+Current Code (Line {line}):
+```python
+{current_display}
+```
+↓
+Improved Code:
+```python
+[Actual corrected line or snippet for this finding]
+```
+
+4. "best_practice": Formatted markdown containing:
+## Best Practice
+[State the recommended rule or best practice developers should remember]
+
+5. "references": Array of strings with relevant OWASP, CWE, or official documentation links.
+
+Return ONLY a valid JSON object matching this exact structure:
 {{
-  "remediations": [
-    {{
-      "id": 1,
-      "why_it_is_problematic": "Hardcoded secrets expose sensitive keys.",
-      "recommended_fix": "Store credentials in environment variables.",
-      "corrected_code_example": "password = os.getenv('DB_PASS')",
-      "best_practice": "Never commit credentials to version control.",
-      "references": ["OWASP Hardcoded Secrets"]
-    }}
-  ]
+  "why_it_is_problematic": "## Problem\\n...\\n\\n## Why it Matters\\n...\\n\\n## Severity\\n...",
+  "recommended_fix": "## How to Fix\\nStep 1: ...\\nStep 2: ...",
+  "corrected_code_example": "## Corrected Code\\n...",
+  "best_practice": "## Best Practice\\n...",
+  "references": ["OWASP Top 10 ...", "CWE-...", "Python Documentation"]
 }}
 """
-        system_prompt = "You are a concise secure coding auditor. Output valid JSON only."
-        result = ollama_service.generate_json(prompt=prompt, system_prompt=system_prompt, temperature=0.1, max_tokens=800)
 
-        items = result.get("remediations", [])
-        if isinstance(result, list):
-            items = result
+        system_prompt = "You are a supportive code reviewer and mentor. NEVER use placeholders. Output valid JSON only."
+        result = client.generate_json(prompt=prompt, system_prompt=system_prompt, temperature=0.2)
 
-        batch_map = {}
-        for item in items:
-            if isinstance(item, dict) and "id" in item:
-                bid = item["id"]
-                prob = item.get("why_it_is_problematic", "")
-                fix = item.get("recommended_fix", "")
-                code_ex = item.get("corrected_code_example", "")
-                bp = item.get("best_practice", "")
-                refs = item.get("references", [])
+        required_keys = ["why_it_is_problematic", "recommended_fix", "corrected_code_example", "best_practice", "references"]
+        for key in required_keys:
+            if key not in result or not result[key]:
+                raise ValueError(f"Missing or empty required key '{key}' in LLM response.")
 
-                batch_map[bid] = {
-                    "why_it_is_problematic": f"## Problem\n{prob}\n\n## Why it Matters\n{prob}",
-                    "recommended_fix": f"## How to Fix\n{fix}",
-                    "corrected_code_example": f"## Corrected Code\n```python\n{code_ex}\n```",
-                    "best_practice": f"## Best Practice\n{bp}",
-                    "references": refs if isinstance(refs, list) else [str(refs)]
-                }
+        if not isinstance(result["references"], list):
+            result["references"] = [str(result["references"])]
 
-        return batch_map
+        return result
 
     def _find_handler(self, text: str):
         for pattern, handler in self._rules:
