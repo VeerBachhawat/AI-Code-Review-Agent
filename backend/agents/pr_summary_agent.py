@@ -128,42 +128,54 @@ class PRSummaryAgent:
         if ollama_service is None:
             raise RuntimeError("Ollama service module unavailable.")
 
-        client = ollama_service
-
         compact_findings = []
         for f in all_findings[:8]:
             compact_findings.append({
                 "issue": f.get("issue"),
-                "severity": f.get("severity")
+                "severity": str(f.get("severity", "Low")).capitalize(),
+                "line": f.get("line", 1)
             })
 
-        prompt = f"""You are a senior engineer mentoring a junior developer on a Pull Request.
+        client = ollama_service
 
-Metrics:
+        crit_cnt = counts.get("critical", 0)
+        high_cnt = counts.get("high", 0)
+        med_cnt = counts.get("medium", 0)
+        low_cnt = counts.get("low", 0)
+
+        prompt = f"""You are a senior tech lead mentoring a junior developer on a Pull Request.
+
+Reviewed Findings Metrics:
 - Code Quality Score: {code_quality_score}/100
 - Security Score: {security_score}/100
-- Findings: {json.dumps(counts)}
-- Top Issues: {json.dumps(compact_findings)}
+- Severity Counts: Critical={crit_cnt}, High={high_cnt}, Medium={med_cnt}, Low={low_cnt}
+- Findings Detail: {json.dumps(compact_findings)}
 
-Return a concise JSON object:
+SEVERITY FIDELITY RULES:
+1. Do NOT claim Critical issues exist if Critical count is 0.
+2. Accurately describe the top findings (High, Medium, Low) that actually exist.
+3. Keep your advice constructive, mentor-style, clear, and actionable.
+
+Return ONLY a concise JSON object with these exact keys:
 {{
   "overall_status": "Approved | Approved with Suggestions | Needs Changes | Rejected",
-  "top_risks": ["1. Fix critical security issues"],
-  "code_quality_summary": "Brief 1-sentence code quality assessment.",
-  "security_summary": "Brief 1-sentence security assessment.",
-  "positive_observations": ["Good effort on structure."],
-  "recommended_next_steps": ["Address high severity security findings first."],
+  "executive_summary": "1-2 sentence high level review summary.",
+  "top_risks": ["Line {compact_findings[0]['severity'] if compact_findings else 'N/A'}: {compact_findings[0]['issue'] if compact_findings else 'Clean code'}"],
+  "code_quality_summary": "1-sentence code quality assessment.",
+  "security_summary": "1-sentence security assessment.",
+  "positive_observations": ["Code is modular and well-structured."],
+  "recommended_next_steps": ["Address the flagged findings before merging."],
   "estimated_remediation_effort": {{
-    "critical": "0 hours",
-    "high": "1 hour",
-    "overall": "Low"
+    "critical": "{crit_cnt * 2} hours",
+    "high": "{high_cnt * 1.5} hours",
+    "overall": "Low | Moderate | High"
   }},
-  "developer_comment": "### PR Review Summary\\n**Status**: {counts.get('critical', 0)} critical issues found. Please address security findings before merging."
+  "developer_comment": "Constructive developer-facing review comment summarizing findings accurately."
 }}
 """
 
-        system_prompt = "You are a supportive senior engineer mentoring junior developers. Output valid JSON only."
-        result = client.generate_json(prompt=prompt, system_prompt=system_prompt, temperature=0.1, max_tokens=250)
+        system_prompt = "You are a supportive senior engineer mentoring junior developers. Output valid JSON only. Be 100% faithful to finding severity counts."
+        result = client.generate_json(prompt=prompt, system_prompt=system_prompt, temperature=0.1, max_tokens=1000)
 
         if not isinstance(result, dict):
             raise ValueError("Ollama returned non-dictionary JSON.")

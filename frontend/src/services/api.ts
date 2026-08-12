@@ -79,5 +79,35 @@ export const apiService = {
       finding
     });
     return response.data;
+  },
+
+  async generateReport(reviewData: any, format: string = 'both') {
+    const response = await apiClient.post('/generate-report', {
+      review: reviewData,
+      format
+    });
+    return response.data;
+  },
+
+  async downloadReportPdf(reviewData: any): Promise<Blob> {
+    const response = await apiClient.post('/download-report/pdf', {
+      review: reviewData
+    }, {
+      responseType: 'blob'
+    });
+    return response.data;
+  },
+
+  async downloadReportHtml(reviewData: any): Promise<Blob> {
+    const response = await apiClient.post('/download-report/html', {
+      review: reviewData
+    }, {
+      responseType: 'blob'
+    });
+    return response.data;
+  },
+
+  getReportDownloadUrl(filename: string): string {
+    return `${API_BASE_URL}/download-report/${filename}`;
   }
 };

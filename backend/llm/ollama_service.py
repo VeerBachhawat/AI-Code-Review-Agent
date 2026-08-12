@@ -47,21 +47,21 @@ class OllamaService:
         self.max_review_tokens = int(
             os.getenv(
                 "LLM_MAX_REVIEW_TOKENS",
-                "600"
+                "2000"
             )
         )
 
         self.max_summary_tokens = int(
             os.getenv(
                 "LLM_MAX_SUMMARY_TOKENS",
-                "250"
+                "1000"
             )
         )
 
         self.max_chat_tokens = int(
             os.getenv(
                 "LLM_MAX_CHAT_TOKENS",
-                "400"
+                "1000"
             )
         )
 
@@ -94,7 +94,8 @@ class OllamaService:
         system_prompt: str,
         user_prompt: str,
         max_tokens: Optional[int] = None,
-        temperature: float = 0.2
+        temperature: float = 0.2,
+        history: Optional[list] = None
     ) -> str:
 
         if max_tokens is None:
@@ -104,20 +105,20 @@ class OllamaService:
         request_id = self.call_count
         logger.info("[OLLAMA] Request #%d | max_tokens=%d | temp=%.2f", request_id, max_tokens, temperature)
 
+        messages = [{"role": "system", "content": system_prompt}]
+
+        if history and isinstance(history, list):
+            for h in history[-4:]:  # Include up to last 4 messages (2 turns)
+                if isinstance(h, dict) and "role" in h and "content" in h:
+                    messages.append({"role": h["role"], "content": str(h["content"])})
+
+        messages.append({"role": "user", "content": user_prompt})
+
         try:
             response = self.client.chat.completions.create(
                 model=self.model,
 
-                messages=[
-                    {
-                        "role": "system",
-                        "content": system_prompt
-                    },
-                    {
-                        "role": "user",
-                        "content": user_prompt
-                    }
-                ],
+                messages=messages,
 
                 temperature=temperature,
                 max_tokens=max_tokens,
@@ -201,14 +202,16 @@ class OllamaService:
     def generate_chat(
         self,
         system_prompt: str,
-        user_prompt: str
+        user_prompt: str,
+        history: Optional[list] = None
     ) -> str:
 
         return self.generate(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             max_tokens=self.max_chat_tokens,
-            temperature=0.3
+            temperature=0.3,
+            history=history
         )
 
     # ============================================================

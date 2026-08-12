@@ -1,6 +1,8 @@
-from security_agent import SecurityAgent
+import os
+from backend.agents.security_agent import SecurityAgent
 
-with open("../../test_files/security_test.py", "r") as f:
+file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "test_files", "security_test.py"))
+with open(file_path, "r", encoding="utf-8") as f:
     code = f.read()
 
 agent = SecurityAgent()

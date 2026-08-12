@@ -1,6 +1,8 @@
-from code_analysis_agent import CodeAnalysisAgent
+import os
+from backend.agents.code_analysis_agent import CodeAnalysisAgent
 
-with open("../../test_files/bad_code.py", "r") as f:
+file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "test_files", "bad_code.py"))
+with open(file_path, "r", encoding="utf-8") as f:
     code = f.read()
 
 agent = CodeAnalysisAgent()

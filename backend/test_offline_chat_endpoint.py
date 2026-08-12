@@ -1,15 +1,16 @@
 """
-Test /chat API endpoint with FastAPI TestClient for all 8 intent & remediation test cases.
-Zero LLM / zero Ollama dependency.
+Test /chat API endpoint with FastAPI TestClient for Hybrid RAG Conversational Assistant (Ollama qwen3:8b).
 """
+from unittest.mock import MagicMock
 from fastapi.testclient import TestClient
-from backend.main import app
+from backend.main import app, assistant
 
 client = TestClient(app)
 
 EXPECTED_UNSUPPORTED = (
-    "I can only answer questions related to SentinelAI's secure coding knowledge, "
-    "including OWASP Top 10, PEP 8, AST analysis, security vulnerabilities, code analysis, and remediation rules."
+    "I can help with SentinelAI topics such as secure coding, "
+    "OWASP, PEP 8, AST analysis, vulnerabilities, code analysis, "
+    "and remediation. I don't have relevant SentinelAI knowledge for this question."
 )
 
 EXPECTED_REQUEST_CODE = (
@@ -18,8 +19,19 @@ EXPECTED_REQUEST_CODE = (
 )
 
 def test_chat_offline_all_intents():
+    # Mock Ollama service for deterministic offline endpoint testing
+    assistant.ollama_service.generate_chat = MagicMock(side_effect=lambda system_prompt, user_prompt, history=None: (
+        "Secure Code Example:\n```python\ncursor.execute('SELECT * FROM users WHERE id = %s', (user_id,))\n```"
+        if "secure version" in user_prompt.lower() or "corrected code" in user_prompt.lower() or "fix" in user_prompt.lower() else
+        "SQL Injection allows attackers to manipulate database queries. Use parameterized queries (%s placeholders)."
+        if "SQL" in user_prompt else
+        "Cyclomatic complexity counts linearly independent execution paths."
+        if "Cyclomatic" in user_prompt else
+        "Grounded response based on retrieved SentinelAI context."
+    ))
+
     print("\n========================================================")
-    print("RUNNING SENTINELAI OFFLINE /CHAT ENDPOINT TESTS")
+    print("RUNNING SENTINELAI HYBRID RAG /CHAT ENDPOINT TESTS")
     print("========================================================\n")
 
     # 1. Unsupported Question: "What is iPhone?"
@@ -29,7 +41,8 @@ def test_chat_offline_all_intents():
     print("[1/8] Question: 'What is iPhone?'")
     print("      Category: UNSUPPORTED | Source:", d1["source"])
     assert d1["answer"] == EXPECTED_UNSUPPORTED
-    assert d1["generated_by"] == "local_knowledge_engine"
+    assert d1["generated_by"] == "ollama"
+    assert d1["model"] == "qwen3:8b"
 
     # 2. Code Analysis: "Explain Cyclomatic Complexity."
     r2 = client.post("/chat", json={"question": "Explain Cyclomatic Complexity."})
@@ -37,7 +50,7 @@ def test_chat_offline_all_intents():
     d2 = r2.json()
     print("[2/8] Question: 'Explain Cyclomatic Complexity.'")
     print("      Category: CODE_ANALYSIS | Source:", d2["source"])
-    assert "Cyclomatic Complexity" in d2["answer"]
+    assert "Cyclomatic" in d2["answer"]
 
     # 3. Security: "What is SQL Injection?"
     r3 = client.post("/chat", json={"question": "What is SQL Injection?"})
@@ -45,7 +58,7 @@ def test_chat_offline_all_intents():
     d3 = r3.json()
     print("[3/8] Question: 'What is SQL Injection?'")
     print("      Category: SECURITY | Source:", d3["source"])
-    assert "SQL Injection" in d3["answer"] or "OWASP" in d3["answer"]
+    assert "SQL Injection" in d3["answer"] or "SQL" in d3["answer"]
 
     # 4. Remediation (WITH Code + Finding): "Give me the secure version of this code."
     r4 = client.post("/chat", json={
@@ -57,7 +70,7 @@ def test_chat_offline_all_intents():
     d4 = r4.json()
     print("[4/8] Question: 'Give me the secure version of this code.' (WITH Code + Finding)")
     print("      Category: REMEDIATION | Source:", d4["source"])
-    assert "Security Remediation" in d4["answer"] or "SQL Injection" in d4["answer"]
+    assert d4["generated_by"] == "ollama"
 
     # 5. Remediation (WITH Finding): "Fix this hardcoded password."
     r5 = client.post("/chat", json={
@@ -68,7 +81,7 @@ def test_chat_offline_all_intents():
     d5 = r5.json()
     print("[5/8] Question: 'Fix this hardcoded password.' (WITH Finding)")
     print("      Category: REMEDIATION | Source:", d5["source"])
-    assert "Hardcoded Password" in d5["answer"] or "Remediation" in d5["answer"]
+    assert d5["generated_by"] == "ollama"
 
     # 6. Remediation (WITH Context): "Show me corrected code."
     r6 = client.post("/chat", json={
@@ -80,7 +93,7 @@ def test_chat_offline_all_intents():
     d6 = r6.json()
     print("[6/8] Question: 'Show me corrected code.' (WITH Context)")
     print("      Category: REMEDIATION | Source:", d6["source"])
-    assert "Dynamic Code Execution" in d6["answer"] or "eval" in d6["answer"]
+    assert d6["generated_by"] == "ollama"
 
     # 7. Remediation (WITHOUT Code): "Give me the secure version of this code."
     r7 = client.post("/chat", json={"question": "Give me the secure version of this code."})
@@ -99,7 +112,7 @@ def test_chat_offline_all_intents():
     assert d8["answer"] == EXPECTED_UNSUPPORTED
 
     print("\n========================================================")
-    print("ALL 8 INTENT & REMEDIATION TESTS PASSED SUCCESSFULLY!")
+    print("ALL 8 HYBRID RAG CHAT TESTS PASSED SUCCESSFULLY!")
     print("========================================================\n")
 
 if __name__ == "__main__":

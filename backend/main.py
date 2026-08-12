@@ -16,9 +16,9 @@ ollama_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1/")
 ollama_model = os.getenv("OLLAMA_MODEL", "qwen3:8b")
 logger.info(f"[OLLAMA CONFIG] Provider: Ollama | Model: {ollama_model} | Base URL: {ollama_url}")
 
-from fastapi import FastAPI, File, UploadFile, Request, status
+from fastapi import FastAPI, File, UploadFile, Request, status, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from pydantic import BaseModel
@@ -27,6 +27,7 @@ from backend.agents.orchestrator import Orchestrator
 from backend.agents.conversational_code_assistant import ConversationalCodeAssistant
 from backend.agents.remediation_agent import RemediationAgent
 from backend.agents.pr_summary_agent import PRSummaryAgent
+from backend.reporting.report_generator import ReportGenerator
 from backend.llm.ollama_service import ollama_service
 
 app = FastAPI(
@@ -80,6 +81,7 @@ orchestrator = Orchestrator()
 assistant = ConversationalCodeAssistant()
 remediation_agent = RemediationAgent()
 pr_summary_agent = PRSummaryAgent()
+report_generator = ReportGenerator()
 
 
 # Helper for non-python review responses
@@ -135,6 +137,7 @@ class ChatRequest(BaseModel):
     pr_summary: Optional[Dict[str, Any]] = None
     code_quality_score: Optional[int] = None
     security_score: Optional[int] = None
+    history: Optional[List[Dict[str, Any]]] = None
 
 
 class FindingRequest(BaseModel):
@@ -145,6 +148,12 @@ class FindingRequest(BaseModel):
     pr_summary: Optional[Dict[str, Any]] = None
     code_quality_score: Optional[int] = None
     security_score: Optional[int] = None
+    history: Optional[List[Dict[str, Any]]] = None
+
+
+class GenerateReportRequest(BaseModel):
+    review: Dict[str, Any]
+    format: Optional[str] = "both"
 
 
 # Existing Endpoints (Preserved)
@@ -322,7 +331,7 @@ def review_code(data: CodeInput):
 def chat(request: ChatRequest):
     """
     RAG-powered conversational endpoint for answering developer security
-    and code quality questions using indexed knowledge bases.
+    and code quality questions using indexed knowledge bases and Ollama Qwen3.
     """
     try:
         response = assistant.ask(
@@ -332,7 +341,8 @@ def chat(request: ChatRequest):
             remediations=request.remediations,
             pr_summary=request.pr_summary,
             code_quality_score=request.code_quality_score,
-            security_score=request.security_score
+            security_score=request.security_score,
+            history=request.history
         )
         return response
     except Exception as e:
@@ -425,3 +435,106 @@ def ask_remediation(request: FindingRequest):
             "status": "error",
             "message": f"Failed to generate remediation guidance: {str(e)}"
         }
+
+
+# ------------------------------------------------------------------------------
+# Report Generation Endpoints (Milestone 4 - Requirement 1)
+# ------------------------------------------------------------------------------
+
+@app.post("/generate-report")
+def generate_report(data: GenerateReportRequest):
+    """
+    Generates dynamic PDF and/or HTML code review reports based on actual review data.
+    """
+    try:
+        review_data = data.review
+        fmt = (data.format or "both").lower().strip()
+        formats_to_gen = ["pdf", "html"] if fmt in ("both", "all") else [fmt]
+
+        generated_files = report_generator.save_report(review_data, formats=formats_to_gen)
+
+        pdf_path = generated_files.get("pdf")
+        html_path = generated_files.get("html")
+
+        pdf_filename = os.path.basename(pdf_path) if pdf_path else None
+        html_filename = os.path.basename(html_path) if html_path else None
+
+        return {
+            "status": "success",
+            "pdf_filename": pdf_filename,
+            "html_filename": html_filename,
+            "pdf_url": f"/download-report/{pdf_filename}" if pdf_filename else None,
+            "html_url": f"/download-report/{html_filename}" if html_filename else None
+        }
+    except Exception as e:
+        logger.exception("[REPORT GENERATION ERROR]")
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "message": f"Report generation failed: {str(e)}"}
+        )
+
+
+@app.get("/download-report/{filename}")
+def download_report_by_name(filename: str):
+    """
+    Downloads a previously generated PDF or HTML report by filename.
+    """
+    safe_filename = os.path.basename(filename)
+    file_path = os.path.join(report_generator.output_dir, safe_filename)
+
+    if not os.path.isfile(file_path):
+        raise HTTPException(status_code=404, detail="Requested report file not found.")
+
+    media_type = "application/pdf" if safe_filename.endswith(".pdf") else "text/html"
+    return FileResponse(
+        path=file_path,
+        media_type=media_type,
+        filename=safe_filename,
+        headers={"Content-Disposition": f"attachment; filename={safe_filename}"}
+    )
+
+
+@app.post("/download-report/pdf")
+def download_report_pdf(data: Dict[str, Any]):
+    """
+    Directly generates and serves a downloadable PDF report for the provided review payload.
+    """
+    try:
+        review_data = data.get("review", data)
+        pdf_path = report_generator.generate_pdf(review_data)
+        filename = os.path.basename(pdf_path)
+        return FileResponse(
+            path=pdf_path,
+            media_type="application/pdf",
+            filename=filename,
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+    except Exception as e:
+        logger.exception("[PDF GENERATION ERROR]")
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "message": f"PDF report generation failed: {str(e)}"}
+        )
+
+
+@app.post("/download-report/html")
+def download_report_html(data: Dict[str, Any]):
+    """
+    Directly generates and serves a downloadable HTML report for the provided review payload.
+    """
+    try:
+        review_data = data.get("review", data)
+        html_path = report_generator.generate_html(review_data)
+        filename = os.path.basename(html_path)
+        return FileResponse(
+            path=html_path,
+            media_type="text/html",
+            filename=filename,
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+    except Exception as e:
+        logger.exception("[HTML GENERATION ERROR]")
+        return JSONResponse(
+            status_code=500,
+            content={"status": "error", "message": f"HTML report generation failed: {str(e)}"}
+        )

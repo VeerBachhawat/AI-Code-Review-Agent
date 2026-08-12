@@ -3,13 +3,28 @@ import { useNavigate } from 'react-router-dom';
 import {
   FileText,
   Download,
-  CheckCircle2
+  CheckCircle2,
+  Loader2,
+  AlertCircle,
+  Sparkles
 } from 'lucide-react';
 import type { ReviewResult } from '../types';
+import { apiService } from '../services/api';
 
 export const Reports: React.FC = () => {
   const navigate = useNavigate();
   const [result, setResult] = useState<ReviewResult | null>(null);
+  const [isGenerating, setIsGenerating] = useState<boolean>(false);
+  const [isDownloadingPdf, setIsDownloadingPdf] = useState<boolean>(false);
+  const [isDownloadingHtml, setIsDownloadingHtml] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [generatedInfo, setGeneratedInfo] = useState<{
+    pdf_filename?: string;
+    html_filename?: string;
+    pdf_url?: string;
+    html_url?: string;
+  } | null>(null);
 
   useEffect(() => {
     const cached = localStorage.getItem('active_review_result');
@@ -28,7 +43,7 @@ export const Reports: React.FC = () => {
       <div className="max-w-7xl mx-auto px-4 py-16 text-center space-y-4">
         <FileText className="w-12 h-12 text-slate-600 mx-auto" />
         <h2 className="text-xl font-bold text-white">No Review Data Selected</h2>
-        <p className="text-sm text-slate-400">Perform a code review to generate downloadable PDF & HTML reports.</p>
+        <p className="text-sm text-slate-400">Perform a code review first to generate exportable PDF & HTML reports.</p>
         <button
           onClick={() => navigate('/review')}
           className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-semibold cursor-pointer transition-all"
@@ -44,92 +59,160 @@ export const Reports: React.FC = () => {
   const code_score = pr_summary?.overall_code_quality || 100;
   const sec_score = pr_summary?.overall_security_score || 100;
 
-  const handleDownloadHTML = () => {
-    const dateStr = new Date().toISOString().replace(/[:.]/g, '-');
-    const htmlString = `<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<title>AI Code Review Report</title>
-<style>
-  body { font-family: system-ui, sans-serif; background: #0b0f17; color: #f8fafc; padding: 40px; }
-  .card { background: #141c2b; border: 1px solid #1e293b; padding: 20px; border-radius: 12px; margin-bottom: 20px; }
-  h1 { color: #3b82f6; }
-  table { width: 100%; border-collapse: collapse; margin-top: 15px; }
-  th, td { padding: 10px; border-bottom: 1px solid #1e293b; text-align: left; }
-  th { background: #0f172a; }
-  .badge { padding: 3px 8px; border-radius: 6px; font-weight: bold; font-size: 12px; }
-  .critical { background: #ef4444; color: white; }
-  .high { background: #f97316; color: white; }
-</style>
-</head>
-<body>
-  <h1>AI Code Review & Security Report</h1>
-  <div class="card">
-    <p><strong>Status:</strong> ${overall_status} | <strong>Code Score:</strong> ${code_score}/100 | <strong>Security Score:</strong> ${sec_score}/100</p>
-  </div>
-  <div class="card">
-    <h2>Detailed Findings (${findings.length})</h2>
-    <table>
-      <tr><th>Issue</th><th>Severity</th><th>Line</th><th>Explanation</th></tr>
-      ${findings
-        .map(
-          (f) =>
-            `<tr><td>${f.issue}</td><td><span class="badge ${f.severity.toLowerCase()}">${f.severity}</span></td><td>${f.line}</td><td>${f.explanation}</td></tr>`
-        )
-        .join('')}
-    </table>
-  </div>
-</body>
-</html>`;
-
-    const blob = new Blob([htmlString], { type: 'text/html' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `code_review_report_${dateStr}.html`;
-    a.click();
-    URL.revokeObjectURL(url);
+  const handleGenerateReport = async () => {
+    setIsGenerating(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const data = await apiService.generateReport(result, 'both');
+      if (data.status === 'success') {
+        setGeneratedInfo(data);
+        setSuccess('PDF & HTML Reports generated successfully!');
+      } else {
+        setError(data.message || 'Report generation failed.');
+      }
+    } catch (err: any) {
+      console.error('Report generation error:', err);
+      setError(err.response?.data?.message || err.message || 'Failed to generate reports from backend server.');
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
-  const handleDownloadPDF = () => {
-    window.print();
+  const handleDownloadPDF = async () => {
+    setIsDownloadingPdf(true);
+    setError(null);
+    try {
+      const blob = await apiService.downloadReportPdf(result);
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = generatedInfo?.pdf_filename || `code_review_report_${Date.now()}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+      setSuccess('PDF Report downloaded successfully!');
+    } catch (err: any) {
+      console.error('PDF Download error:', err);
+      setError(err.response?.data?.message || err.message || 'Failed to download PDF report.');
+    } finally {
+      setIsDownloadingPdf(false);
+    }
+  };
+
+  const handleDownloadHTML = async () => {
+    setIsDownloadingHtml(true);
+    setError(null);
+    try {
+      const blob = await apiService.downloadReportHtml(result);
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = generatedInfo?.html_filename || `code_review_report_${Date.now()}.html`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+      setSuccess('HTML Report downloaded successfully!');
+    } catch (err: any) {
+      console.error('HTML Download error:', err);
+      setError(err.response?.data?.message || err.message || 'Failed to download HTML report.');
+    } finally {
+      setIsDownloadingHtml(false);
+    }
   };
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+      {/* Header Banner */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 glass-panel p-6">
         <div>
           <h1 className="text-2xl font-bold text-white flex items-center gap-2">
             <FileText className="w-6 h-6 text-blue-400" />
             Executive Code Audit Reports
           </h1>
-          <p className="text-xs text-slate-400 mt-1">Export executive PDF documents & HTML reports for distribution.</p>
+          <p className="text-xs text-slate-400 mt-1">Export executive multi-page PDF & HTML reports generated dynamically from review results.</p>
         </div>
 
         <div className="flex flex-wrap gap-3">
           <button
-            onClick={handleDownloadHTML}
-            className="inline-flex items-center space-x-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-blue-600/30 cursor-pointer transition-all"
+            onClick={handleGenerateReport}
+            disabled={isGenerating}
+            className="inline-flex items-center space-x-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-xl text-xs font-semibold shadow-lg shadow-blue-600/30 cursor-pointer transition-all"
           >
-            <Download className="w-4 h-4" />
-            <span>Download HTML Report</span>
+            {isGenerating ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>Generating Reports...</span>
+              </>
+            ) : (
+              <>
+                <Sparkles className="w-4 h-4" />
+                <span>Generate Backend Report</span>
+              </>
+            )}
           </button>
+
           <button
             onClick={handleDownloadPDF}
-            className="inline-flex items-center space-x-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold cursor-pointer transition-all"
+            disabled={isDownloadingPdf}
+            className="inline-flex items-center space-x-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-xs font-semibold shadow-lg shadow-emerald-600/30 cursor-pointer transition-all"
           >
-            <FileText className="w-4 h-4 text-emerald-400" />
-            <span>Export / Print PDF Report</span>
+            {isDownloadingPdf ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>Downloading PDF...</span>
+              </>
+            ) : (
+              <>
+                <FileText className="w-4 h-4" />
+                <span>Download PDF Report</span>
+              </>
+            )}
+          </button>
+
+          <button
+            onClick={handleDownloadHTML}
+            disabled={isDownloadingHtml}
+            className="inline-flex items-center space-x-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold cursor-pointer transition-all"
+          >
+            {isDownloadingHtml ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>Downloading HTML...</span>
+              </>
+            ) : (
+              <>
+                <Download className="w-4 h-4 text-blue-400" />
+                <span>Download HTML Report</span>
+              </>
+            )}
           </button>
         </div>
       </div>
 
+      {/* Notifications / Alerts */}
+      {error && (
+        <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-xs flex items-center gap-2">
+          <AlertCircle className="w-4 h-4 shrink-0" />
+          <span>{error}</span>
+        </div>
+      )}
+
+      {success && (
+        <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs flex items-center gap-2">
+          <CheckCircle2 className="w-4 h-4 shrink-0" />
+          <span>{success}</span>
+        </div>
+      )}
+
+      {/* Report Metrics & Details */}
       <div className="glass-panel p-6 space-y-6">
         <div className="border-b border-slate-800 pb-4 flex items-center justify-between">
           <div>
-            <h2 className="text-lg font-bold text-white">Report Summary & Document Preview</h2>
-            <p className="text-xs text-slate-400">Analysis summary generated from multi-agent review pipeline</p>
+            <h2 className="text-lg font-bold text-white">Report Content Summary</h2>
+            <p className="text-xs text-slate-400">Review results mapped dynamically from backend orchestrator pipeline</p>
           </div>
           <span
             className={`px-3 py-1 rounded-full text-xs font-bold border ${
@@ -167,23 +250,23 @@ export const Reports: React.FC = () => {
         </div>
 
         <div className="space-y-4 pt-4 border-t border-slate-800">
-          <h3 className="text-sm font-bold text-white">Included Report Sections:</h3>
+          <h3 className="text-sm font-bold text-white">Included Document Sections:</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs text-slate-300">
             <div className="p-3 rounded-lg bg-slate-900/40 border border-slate-800 flex items-center space-x-2">
               <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-              <span>1. Cover Banner & Executive Status</span>
+              <span>Page 1: Title, Metadata & Review Summary Dashboard</span>
             </div>
             <div className="p-3 rounded-lg bg-slate-900/40 border border-slate-800 flex items-center space-x-2">
               <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-              <span>2. Code Quality & Security Score Mappings</span>
+              <span>Page 2: Executive Summary, Severity Breakdown & PR Summary</span>
             </div>
             <div className="p-3 rounded-lg bg-slate-900/40 border border-slate-800 flex items-center space-x-2">
               <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-              <span>3. Severity Breakdown & Detailed Findings Table</span>
+              <span>Page 3+: Detailed Findings with Source Code & Remediation</span>
             </div>
             <div className="p-3 rounded-lg bg-slate-900/40 border border-slate-800 flex items-center space-x-2">
               <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-              <span>4. Refactored Code Snippets & OWASP References</span>
+              <span>Remediation Roadmap: Prioritized Action Categories</span>
             </div>
           </div>
         </div>

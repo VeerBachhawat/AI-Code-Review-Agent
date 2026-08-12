@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SentinelAI — Code Review & Security Report</title>
+    <style>
+        :root {
+            --bg-main: #0f172a;
+            --card-bg: #1e293b;
+            --card-border: #334155;
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --accent: #2563eb;
+            --radius: 12px;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-main);
+            color: var(--text-primary);
+            margin: 0;
+            padding: 0;
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1100px;
+            margin: 40px auto;
+            padding: 0 20px;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+            border: 1px solid var(--card-border);
+            color: #ffffff;
+            padding: 32px;
+            border-radius: var(--radius);
+            margin-bottom: 24px;
+            box-shadow: 0 10px 25px -5px rgba(0,0,0,0.3);
+        }
+
+        .header h1 {
+            margin: 0 0 8px 0;
+            font-size: 28px;
+            color: #38bdf8;
+        }
+
+        .header-meta {
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+
+        .dashboard {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .card {
+            background: var(--card-bg);
+            padding: 20px;
+            border-radius: var(--radius);
+            border: 1px solid var(--card-border);
+            text-align: center;
+        }
+
+        .card-title {
+            font-size: 12px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 6px;
+        }
+
+        .card-value {
+            font-size: 30px;
+            font-weight: 800;
+            color: var(--text-primary);
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 9999px;
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+
+        .badge-critical { background-color: #fee2e2; color: #991b1b; }
+        .badge-high { background-color: #ffedd5; color: #9a3412; }
+        .badge-medium { background-color: #fef3c7; color: #92400e; }
+        .badge-low { background-color: #dbeafe; color: #1e40af; }
+
+        .status-approved { color: #4ade80; }
+        .status-rejected { color: #f87171; }
+        .status-changes { color: #fbbf24; }
+
+        .section {
+            background: var(--card-bg);
+            padding: 28px;
+            border-radius: var(--radius);
+            border: 1px solid var(--card-border);
+            margin-bottom: 24px;
+        }
+
+        .section-title {
+            font-size: 20px;
+            margin-top: 0;
+            margin-bottom: 16px;
+            border-bottom: 2px solid var(--card-border);
+            padding-bottom: 10px;
+            color: #38bdf8;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 12px;
+        }
+
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid var(--card-border);
+        }
+
+        th {
+            background-color: #0f172a;
+            font-size: 12px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+        }
+
+        .agent-tag {
+            background: #334155;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            color: #e2e8f0;
+        }
+
+        .finding-card {
+            border: 1px solid var(--card-border);
+            border-radius: var(--radius);
+            padding: 20px;
+            margin-bottom: 16px;
+            background: #111827;
+        }
+
+        .finding-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+
+        .finding-title {
+            margin: 0;
+            font-size: 16px;
+            flex-grow: 1;
+            color: #f1f5f9;
+        }
+
+        .finding-meta {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .code-block-wrapper {
+            margin: 10px 0;
+        }
+
+        .code-title {
+            font-size: 11px;
+            color: #94a3b8;
+            font-weight: bold;
+            margin-bottom: 4px;
+        }
+
+        pre {
+            background: #090d16;
+            border: 1px solid #1e293b;
+            color: #e2e8f0;
+            padding: 14px;
+            border-radius: 8px;
+            overflow-x: auto;
+            font-size: 13px;
+            font-family: "Courier New", Courier, monospace;
+            margin: 0;
+        }
+
+        .roadmap-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+            gap: 16px;
+            margin-top: 16px;
+        }
+
+        .roadmap-card {
+            background: #111827;
+            border: 1px solid var(--card-border);
+            border-radius: 8px;
+            padding: 16px;
+        }
+
+        .roadmap-card h4 {
+            margin-top: 0;
+            margin-bottom: 10px;
+        }
+
+        .roadmap-card ul {
+            padding-left: 18px;
+            margin: 0;
+            font-size: 13px;
+        }
+
+        footer {
+            text-align: center;
+            padding: 24px;
+            color: var(--text-secondary);
+            font-size: 13px;
+        }
+
+        /* Print Specific CSS Page Breaks */
+        @media print {
+            body {
+                background-color: #ffffff !important;
+                color: #000000 !important;
+            }
+            .container {
+                max-width: 100% !important;
+                margin: 0 !important;
+                padding: 0 !important;
+            }
+            .header, .card, .section, .finding-card, .roadmap-card {
+                background: #ffffff !important;
+                color: #000000 !important;
+                border: 1px solid #ccc !important;
+                box-shadow: none !important;
+            }
+            .header h1, .section-title, .finding-title {
+                color: #000000 !important;
+            }
+            pre {
+                background: #f8fafc !important;
+                color: #000000 !important;
+                border: 1px solid #ccc !important;
+            }
+            .page-break {
+                page-break-before: always;
+                break-before: page;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- PAGE 1: Header Banner & Review Summary -->
+        <div class="header">
+            <h1>SentinelAI</h1>
+            <div class="header-meta">
+                <span>Date: <strong>2026-08-12 20:29:27</strong></span> | 
+                <span>Language: <strong>Python</strong></span> | 
+                <span>Execution Time: <strong>56882.47 ms</strong></span> | 
+                <span>Status: <strong class="status-changes">Needs Changes</strong></span>
+            </div>
+        </div>
+
+        <div class="dashboard">
+            <div class="card">
+                <div class="card-title">Review Status</div>
+                <div class="card-value status-changes">Needs Changes</div>
+            </div>
+            <div class="card">
+                <div class="card-title">Code Quality Score</div>
+                <div class="card-value" style="color: #4ade80;">95<small style="font-size:16px;">/100</small></div>
+            </div>
+            <div class="card">
+                <div class="card-title">Security Score</div>
+                <div class="card-value" style="color: #60a5fa;">90<small style="font-size:16px;">/100</small></div>
+            </div>
+            <div class="card">
+                <div class="card-title">Total Findings</div>
+                <div class="card-value" style="color: #f87171;">2</div>
+            </div>
+        </div>
+
+        <div class="page-break"></div>
+
+        <!-- PAGE 2: Executive Summary & PR Review -->
+        <div class="section">
+            <h2 class="section-title">Executive Summary & Severity Distribution</h2>
+            <div style="display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap;">
+                <span class="badge badge-critical">Critical: 0</span>
+                <span class="badge badge-high">High: 1</span>
+                <span class="badge badge-medium">Medium: 1</span>
+                <span class="badge badge-low">Low: 0</span>
+            </div>
+            <p>Security posture is solid (90/100), but minor items require attention. Good code quality (95/100) with minor maintainability suggestions to clean up.</p>
+        </div>
+
+        <div class="section">
+            <h2 class="section-title">Pull Request Summary</h2>
+            <h3>What is Good</h3><ul><li>No critical security vulnerabilities were found.</li></ul>
+            <h3>Top Priority Risks</h3><ul><li>Priority 1 - Line 4 [High]: Hardcoded Authentication Logic (Hardcoded credential comparison detected. Use a secure database lookup and password hashing verification.)</li><li>Priority 2 - Line 0 [Medium]: Maintainability Score: 71.3/100 (Code maintainability score is 71.3/100 based on Halstead volume (80.0), total cyclomatic complexity (1), and lines of code (5).)</li></ul>
+            <h3>Recommended Next Steps</h3><ul><li>2. Fix High-severity issues before merging the PR.</li><li>3. Address minor code quality and readability suggestions.</li><li>4. Apply the provided step-by-step code fixes.</li></ul>
+            <p><strong>Estimated Remediation Effort:</strong> Critical: 0 hours | High: 1.5 hours | Overall: Moderate (3-5 hours)</p>
+            <p><strong>Developer Comment:</strong> <em>## ⚠️ Pull Request Review Summary
+**Overall Status:** `Needs Changes`
+**Security Score:** `90/100` | **Code Quality Score:** `95/100`
+
+### Executive Summary
+Thanks for submitting this pull request! The code has been reviewed for security and readability.
+We found **2 total findings** (0 Critical, 1 High, 1 Medium, 0 Low).
+
+### Priority Fix Order (Top Issues)
+- Priority 1 - Line 4 [High]: Hardcoded Authentication Logic (Hardcoded credential comparison detected. Use a secure database lookup and password hashing verification.)
+- Priority 2 - Line 0 [Medium]: Maintainability Score: 71.3/100 (Code maintainability score is 71.3/100 based on Halstead volume (80.0), total cyclomatic complexity (1), and lines of code (5).)
+
+### Recommended Next Steps
+- 2. Fix High-severity issues before merging the PR.
+- 3. Address minor code quality and readability suggestions.
+- 4. Apply the provided step-by-step code fixes.
+
+### Overall Recommendation
+Status: **Needs Changes**. Please review the suggestions above to finalize your code!
+
+---
+*Automated Senior Engineer Code Reviewer*</em></p>
+        </div>
+
+        <div class="page-break"></div>
+
+        <!-- PAGE 3+: Detailed Findings -->
+        <div class="section">
+            <h2 class="section-title">Detailed Findings Overview</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Issue</th>
+                        <th>Severity</th>
+                        <th>Line</th>
+                        <th>Agent</th>
+                        <th>Explanation</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    
+            <tr>
+                <td><strong>#1 Maintainability Score: 71.3/100</strong></td>
+                <td><span class="badge badge-medium">Medium</span></td>
+                <td><code>Line 0</code></td>
+                <td><span class="agent-tag">Code Analysis</span></td>
+                <td>Code maintainability score is 71.3/100 based on Halstead volume (80.0), total cyclomatic complexity (1), and lines of code (5).</td>
+            </tr>
+            
+            <tr>
+                <td><strong>#2 Hardcoded Authentication Logic</strong></td>
+                <td><span class="badge badge-high">High</span></td>
+                <td><code>Line 4</code></td>
+                <td><span class="agent-tag">Security</span></td>
+                <td>Hardcoded credential comparison detected. Use a secure database lookup and password hashing verification.</td>
+            </tr>
+            
+                </tbody>
+            </table>
+        </div>
+
+        <div class="section">
+            <h2 class="section-title">Detailed Findings & Remediation Guidance</h2>
+            
+            <div class="finding-card">
+                <div class="finding-header">
+                    <span class="badge badge-medium">Medium</span>
+                    <h3 class="finding-title">#1 Maintainability Score: 71.3/100</h3>
+                    <span class="finding-meta">Line 0 &bull; Code Analysis</span>
+                </div>
+                <div class="finding-body">
+                    <p><strong>What is wrong?</strong> Code maintainability score is 71.3/100 based on Halstead volume (80.0), total cyclomatic complexity (1), and lines of code (5).</p>
+                    <p><strong>Why it matters?</strong> ## Problem
+Code complexity is high and maintainability score is low.
+
+## Why it Matters
+Complex code accumulates technical debt and makes future changes risky.</p>
+                    
+                    <p><strong>Recommended fix:</strong> ## How to Fix
+1. Break complex methods into simple, modular functions.</p>
+                    <div class="code-block-wrapper"><div class="code-title">Corrected code example:</div><pre><code>## Corrected Code
+Current Code (Line 1):
+```python
+username = input(&quot;Username: &quot;)
+```
+↓
+Improved Code:
+```python
+def process(item):
+    validate(item)
+    save(item)
+```</code></pre></div>
+                    <p><strong>Best practice:</strong> ## Best Practice
+Maintain clean modular structure and low complexity.</p>
+                    <div class="ref-block"><strong>References:</strong><ul><li>Maintainability Index Standard</li><li>Clean Code Principles</li></ul></div>
+                </div>
+            </div>
+            
+            <div class="finding-card">
+                <div class="finding-header">
+                    <span class="badge badge-high">High</span>
+                    <h3 class="finding-title">#2 Hardcoded Authentication Logic</h3>
+                    <span class="finding-meta">Line 4 &bull; Security</span>
+                </div>
+                <div class="finding-body">
+                    <p><strong>What is wrong?</strong> Hardcoded credential comparison detected. Use a secure database lookup and password hashing verification.</p>
+                    <p><strong>Why it matters?</strong> ## Problem
+Passwords are being handled or compared in plain text.
+
+## Why it Matters
+Plaintext passwords can be leaked through log files or database breaches, allowing accounts to be easily taken over.
+
+## Severity
+Critical. Insecure password handling compromises user account identity.</p>
+                    
+                    <p><strong>Recommended fix:</strong> ## How to Fix
+1. Never store raw passwords in database tables or variables.
+2. Use strong password hashing algorithms like argon2 or passlib (pbkdf2).</p>
+                    <div class="code-block-wrapper"><div class="code-title">Corrected code example:</div><pre><code>## Corrected Code
+Current Code (Line 4):
+```python
+if username == &quot;admin&quot; and password == &quot;admin123&quot;:
+```
+↓
+Improved Code:
+```python
+from passlib.hash import pbkdf2_sha256
+hashed_password = pbkdf2_sha256.hash(raw_password)
+```</code></pre></div>
+                    <p><strong>Best practice:</strong> ## Best Practice
+Always store passwords using strong, salted password hashes like Argon2id or PBKDF2.</p>
+                    <div class="ref-block"><strong>References:</strong><ul><li>OWASP Top 10: A07:2021 - Authentication Failures</li><li>CWE-256: Unprotected Credentials</li><li>PassLib Documentation</li></ul></div>
+                </div>
+            </div>
+            
+        </div>
+
+        <div class="section">
+            <h2 class="section-title">Remediation Roadmap</h2>
+            <p>Prioritized developer action plan based on issue severity:</p>
+            <div class="roadmap-grid">
+                
+            <div class="roadmap-card">
+                <h4><span class="badge badge-critical">Immediate Action (Critical)</span> (0)</h4>
+                <ul><li><em>No items in this priority category.</em></li></ul>
+            </div>
+            
+            <div class="roadmap-card">
+                <h4><span class="badge badge-high">High Priority (High)</span> (1)</h4>
+                <ul><li><strong>Line 4</strong> (Security): Hardcoded Authentication Logic</li></ul>
+            </div>
+            
+            <div class="roadmap-card">
+                <h4><span class="badge badge-medium">Medium Priority (Medium)</span> (1)</h4>
+                <ul><li><strong>Line 0</strong> (Code Analysis): Maintainability Score: 71.3/100</li></ul>
+            </div>
+            
+            <div class="roadmap-card">
+                <h4><span class="badge badge-low">Low Priority (Low)</span> (0)</h4>
+                <ul><li><em>No items in this priority category.</em></li></ul>
+            </div>
+            
+            </div>
+        </div>
+
+        <footer>
+            Generated by SentinelAI Agent &bull; Confidential Code Audit Report
+        </footer>
+    </div>
+</body>
+</html>

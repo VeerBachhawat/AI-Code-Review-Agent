@@ -137,9 +137,10 @@ class Orchestrator:
             error_finding = {
                 "agent": name.replace("_", " ").title(),
                 "status": "failed",
-                "severity": "High",
-                "issue": f"{name.replace('_', ' ').title()} Failure",
-                "explanation": f"Agent failed during execution: {str(e)}",
+                "is_agent_error": True,
+                "severity": "Error",
+                "issue": f"{name.replace('_', ' ').title()} Execution Error",
+                "explanation": f"Agent encountered an unexpected runtime error: {str(e)}",
                 "line": 0,
                 "error": str(e)
             }
@@ -160,17 +161,11 @@ class Orchestrator:
         except Exception as e:
             logger.error(f"RemediationAgent failed: {str(e)}", exc_info=True)
             agent_status["remediation"] = "failed"
-            fallback_remediation = [{
-                "issue": "Remediation Agent Error",
-                "severity": "Low",
-                "line": 0,
-                "why_it_is_problematic": f"Remediation engine encountered an error: {str(e)}",
-                "recommended_fix": "Refer to standard security documentation for manual remediation guidance.",
-                "corrected_code_example": f"# Error during remediation: {str(e)}",
-                "best_practice": "Ensure code adheres to OWASP guidelines and PEP 8 standards.",
-                "references": ["OWASP Guidelines"]
+            failure_remediation = [{
+                "status": "failed",
+                "error": f"Remediation generation failed: {str(e)}"
             }]
-            return fallback_remediation, agent_status
+            return failure_remediation, agent_status
 
     def _run_pr_summary_agent(self, findings: List[Dict[str, Any]], remediations: List[Dict[str, Any]], agent_status: Dict[str, str]) -> Tuple[Dict[str, Any], Dict[str, str]]:
         try:
@@ -181,30 +176,33 @@ class Orchestrator:
         except Exception as e:
             logger.error(f"PRSummaryAgent failed: {str(e)}", exc_info=True)
             agent_status["pr_summary"] = "failed"
+
+            real_counts = {
+                "total_findings": sum(1 for f in findings if not f.get("is_agent_error")),
+                "critical": sum(1 for f in findings if str(f.get("severity", "")).lower() == "critical"),
+                "high": sum(1 for f in findings if str(f.get("severity", "")).lower() == "high"),
+                "medium": sum(1 for f in findings if str(f.get("severity", "")).lower() == "medium"),
+                "low": sum(1 for f in findings if str(f.get("severity", "")).lower() == "low"),
+            }
+
             fallback_pr_summary = {
-                "overall_status": "Needs Review",
-                "overall_code_quality": 50,
-                "overall_security_score": 50,
-                "summary": {
-                    "total_findings": len(findings),
-                    "critical": 0,
-                    "high": 0,
-                    "medium": 0,
-                    "low": 0
-                },
-                "top_risks": ["PR Summary Agent encountered an error during review aggregation."],
-                "code_quality_summary": "Summary generation encountered an error.",
-                "security_summary": "Summary generation encountered an error.",
+                "overall_status": "Unavailable",
+                "overall_code_quality": None,
+                "overall_security_score": None,
+                "summary": real_counts,
+                "top_risks": [],
+                "code_quality_summary": "PR Summary generation failed.",
+                "security_summary": "PR Summary generation failed.",
                 "positive_observations": [],
-                "recommended_next_steps": ["Review individual agent findings."],
-                "estimated_remediation_effort": {"critical": "Unknown", "high": "Unknown", "overall": "Unknown"},
-                "developer_comment": f"⚠️ Automated PR summary failed: {str(e)}"
+                "recommended_next_steps": [],
+                "estimated_remediation_effort": "Unavailable",
+                "developer_comment": f"PR Summary generation error: {str(e)}"
             }
             return fallback_pr_summary, agent_status
 
     def _build_summary_metrics(self, findings: List[Dict[str, Any]], agent_status: Dict[str, str]) -> Dict[str, Any]:
         return {
-            "total_findings": len(findings),
+            "total_findings": sum(1 for f in findings if not f.get("is_agent_error")),
             "critical": sum(1 for f in findings if str(f.get("severity", "")).lower() == "critical"),
             "high": sum(1 for f in findings if str(f.get("severity", "")).lower() == "high"),
             "medium": sum(1 for f in findings if str(f.get("severity", "")).lower() == "medium"),
