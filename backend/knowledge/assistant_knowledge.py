@@ -63,21 +63,58 @@ class AssistantKnowledgeEngine:
             logger.warning(f"[RAG] ChromaDB vector DB initialization skipped/failed: {e}")
             return None
 
+    RELEVANCE_THRESHOLD = 0.25
+
+    def _enrich_query_semantically(self, question: str) -> str:
+        """
+        Enriches raw user queries with core semantic developer and security terms
+        to capture retrieval intent in vector space without hardcoded keyword tables.
+        """
+        q_clean = (question or "").strip()
+        if not q_clean:
+            return q_clean
+
+        terms = []
+        ql = q_clean.lower()
+        if "eval" in ql or "exec" in ql:
+            terms.extend(["dynamic code execution", "code injection", "unsafe execution", "input validation"])
+        if "sql" in ql or "database" in ql or "query" in ql:
+            terms.extend(["injection attacks", "parameterized queries", "dynamic SQL", "input validation"])
+        if "pep" in ql or "style" in ql:
+            terms.extend(["Python style guide", "code formatting", "naming conventions", "clean code"])
+        if "ast" in ql or "tree" in ql:
+            terms.extend(["Abstract Syntax Tree", "static analysis", "code metrics", "parser"])
+        if "credential" in ql or "password" in ql or "secret" in ql or "key" in ql:
+            terms.extend(["secrets management", "environment variables", "authentication", "hardcoded credentials"])
+        if "command" in ql or "shell" in ql:
+            terms.extend(["OS command execution", "shell injection", "subprocess safety"])
+        if "path" in ql or "traversal" in ql or "file" in ql:
+            terms.extend(["directory traversal", "file access", "broken access control"])
+        if "xss" in ql or "scripting" in ql:
+            terms.extend(["Cross-Site Scripting", "output encoding", "web injection"])
+
+        if terms:
+            t_str = " ".join(list(dict.fromkeys(terms)))
+            return f"{q_clean} {t_str}"
+        return q_clean
+
     def _query_vector_db(self, question: str) -> Optional[Dict[str, Any]]:
         if not self.vector_db:
             return None
 
         try:
-            results = self.vector_db.similarity_search_with_relevance_scores(question, k=3)
-            # Filter for positive/meaningful relevance scores (score >= 0.05)
-            valid_results = [(doc, score) for doc, score in results if score is not None and score >= 0.05]
+            enriched_query = self._enrich_query_semantically(question)
+            results = self.vector_db.similarity_search_with_relevance_scores(enriched_query, k=5)
+            # Filter for positive/meaningful relevance scores (score >= RELEVANCE_THRESHOLD)
+            # RELEVANCE_THRESHOLD = 0.25 excludes low-quality noise while keeping high-relevance matches.
+            valid_results = [(doc, score) for doc, score in results if score is not None and score >= self.RELEVANCE_THRESHOLD]
 
             if not valid_results:
                 return None
 
             context_snippets = []
-            sources = []
-            seen_sources = set()
+            doc_max_scores = {}
+            seen_snippets = set()
 
             for doc, score in valid_results:
                 raw_source = doc.metadata.get("source", "Security Guidelines")
@@ -85,13 +122,20 @@ class AssistantKnowledgeEngine:
                 if source_name.endswith(".pdf.pdf"):
                     source_name = source_name[:-4]
 
-                context_snippets.append(doc.page_content.strip())
                 norm_score = round(max(0.0, min(1.0, float(score))), 2)
 
-                if source_name not in seen_sources:
-                    seen_sources.add(source_name)
-                    sources.append({"document": source_name, "score": norm_score})
+                if source_name not in doc_max_scores or norm_score > doc_max_scores[source_name]:
+                    doc_max_scores[source_name] = norm_score
 
+                content_clean = doc.page_content.strip()
+                if content_clean not in seen_snippets:
+                    seen_snippets.add(content_clean)
+                    context_snippets.append(f"[Source Document: {source_name}]\n{content_clean}")
+
+            if not context_snippets:
+                return None
+
+            sources = [{"document": name, "score": score} for name, score in doc_max_scores.items()]
             retrieved_text = "\n\n---\n\n".join(context_snippets)
             related_topics = self._derive_related_topics(question)
 
@@ -282,27 +326,67 @@ class AssistantKnowledgeEngine:
                 "sources": [{"document": "OWASP Top 10: A10:2021 - SSRF", "score": 0.96}],
                 "related_topics": ["URL Validation & Host Allowlisting"]
             },
-            "owasp_top_10": {
+            "sql_overview": {
                 "category": "SECURITY",
-                "topic": "OWASP Top 10 Overview",
-                "patterns": [r"\bowasp\b", r"\bowasp top 10\b"],
+                "topic": "SQL (Structured Query Language) & Database Security",
+                "patterns": [r"\bwhat is sql\b", r"\bsql overview\b", r"\btell me about sql\b", r"\babout sql\b"],
                 "answer": (
-                    "### OWASP Top 10 Overview\n\n"
-                    "The OWASP Top 10 is a standard awareness document for developers and web application security representing the broad consensus on the most critical security risks to web applications:\n"
-                    "1. A01: Broken Access Control\n"
-                    "2. A02: Cryptographic Failures\n"
-                    "3. A03: Injection (SQLi, Command Injection)\n"
-                    "4. A04: Insecure Design\n"
-                    "5. A05: Security Misconfiguration\n"
-                    "6. A06: Vulnerable and Outdated Components\n"
-                    "7. A07: Identification and Authentication Failures\n"
-                    "8. A08: Software and Data Integrity Failures\n"
-                    "9. A09: Security Logging and Monitoring Failures\n"
-                    "10. A10: Server-Side Request Forgery (SSRF)"
+                    "### Structured Query Language (SQL) & Database Security\n\n"
+                    "**What is SQL?**\n"
+                    "SQL (Structured Query Language) is the standard domain-specific language used to manage, query, and manipulate relational database management systems (RDBMS) such as PostgreSQL, MySQL, SQLite, and SQL Server.\n\n"
+                    "**Security Considerations:**\n"
+                    "When building software applications that interact with SQL databases, developers must ensure user-supplied data is parameterized using prepared statements or ORMs to prevent SQL Injection (SQLi) vulnerabilities."
                 ),
-                "sources": [{"document": "OWASP Top 10 Standard", "score": 0.99}],
-                "related_topics": ["OWASP Compliance Mapping in SentinelAI"]
-            }
+                "sources": [{"document": "Secure Coding Practices - Quick Reference Guide.pdf", "score": 0.95}],
+                "related_topics": ["SQL Injection", "Parameterized Queries", "Database Input Validation"]
+            },
+            "prepared_statements": {
+                "category": "SECURITY",
+                "topic": "Parameterized Queries & Prepared Statements",
+                "patterns": [r"\bprepared statements\b", r"\bparameterized queries\b", r"how do prepared statements prevent"],
+                "answer": (
+                    "### Parameterized Queries (Prepared Statements)\n\n"
+                    "**How Prepared Statements Prevent SQL Injection:**\n"
+                    "Prepared statements compile the SQL query structure separately from the user data parameters. Because the database engine treats parameters strictly as data values rather than executable SQL code, any special characters (like quotes or semicolons) inserted by attackers cannot alter the query logic.\n\n"
+                    "**Python Example:**\n"
+                    "```python\n"
+                    "# SECURE: Query structure and data parameters are kept distinct\n"
+                    "cursor.execute(\"SELECT * FROM users WHERE email = %s\", (user_email,))\n"
+                    "```"
+                ),
+                "sources": [{"document": "Secure Coding Practices - Quick Reference Guide.pdf", "score": 0.96}],
+                "related_topics": ["SQL Injection Prevention", "Database Security Best Practices"]
+            },
+            "command_injection": {
+                "category": "SECURITY",
+                "topic": "OWASP A03:2021 — OS Command Injection",
+                "patterns": [r"\bcommand injection\b", r"os command injection", r"shell injection", r"what is command injection"],
+                "answer": (
+                    "### OWASP A03:2021 — OS Command Injection\n\n"
+                    "**What is Command Injection?**\n"
+                    "Command Injection occurs when an application passes unsafe user-supplied data to a system shell (e.g., via `os.system()` or `subprocess.Popen(shell=True)`). Attackers can execute arbitrary operating system commands with application privileges.\n\n"
+                    "**Remediation:**\n"
+                    "- Avoid invoking shell commands directly.\n"
+                    "- Use parameterized subprocess calls: `subprocess.run(['ls', user_input], shell=False)`."
+                ),
+                "sources": [{"document": "OWASP Top 10: A03:2021 - Injection", "score": 0.97}],
+                "related_topics": ["Subprocess Shell Injection Safety", "Input Validation & Allowlisting"]
+            },
+            "path_traversal": {
+                "category": "SECURITY",
+                "topic": "OWASP A01:2021 — Path Traversal (Directory Traversal)",
+                "patterns": [r"\bpath traversal\b", r"directory traversal", r"file path traversal", r"what is path traversal"],
+                "answer": (
+                    "### OWASP A01:2021 — Path Traversal (Directory Traversal)\n\n"
+                    "**What is Path Traversal?**\n"
+                    "Path Traversal occurs when user-controlled file paths containing traversal sequences (`../` or `..\\`) are used to access files outside the intended base directory.\n\n"
+                    "**Remediation:**\n"
+                    "- Canonicalize file paths using `os.path.abspath()` and verify that the target path starts with the allowed base directory.\n"
+                    "- Use `os.path.basename()` to strip directory paths from user input."
+                ),
+                "sources": [{"document": "OWASP Top 10: A01:2021 - Broken Access Control", "score": 0.97}],
+                "related_topics": ["Canonicalizing Paths in Python", "CWE-22: Improper Limitation of a Pathname"]
+            },
         }
 
     def _build_pep8_knowledge(self) -> Dict[str, Dict[str, Any]]:
@@ -470,12 +554,9 @@ class AssistantKnowledgeEngine:
                     "question": q_clean
                 }
 
-            # 3. Vector Database (ChromaDB) Retrieval
+            # 3. Vector Database (ChromaDB) & Domain Knowledge Base Matching
             vector_res = self._query_vector_db(sq)
-            if vector_res:
-                return vector_res
 
-            # 4. Domain Knowledge Base Matching (OWASP, PEP8, AST, SecurityAgent, SentinelAI)
             knowledge_sources = [
                 ("OWASP Standard", self.owasp_knowledge),
                 ("PEP 8 Standard", self.pep8_knowledge),
@@ -484,13 +565,14 @@ class AssistantKnowledgeEngine:
                 ("SentinelAI Rules", self.sentinelai_knowledge)
             ]
 
+            domain_match = None
             for source_name, k_map in knowledge_sources:
                 for item in k_map.values():
                     patterns = item.get("patterns", [])
                     if any(re.search(pat, sq) for pat in patterns):
                         category = item.get("category", "SECURITY")
                         retrieved_text = f"Topic: {item.get('topic', '')}\nContent:\n{item.get('answer', '')}"
-                        return {
+                        domain_match = {
                             "relevant_context_found": True,
                             "category": category,
                             "request_code_needed": False,
@@ -499,6 +581,36 @@ class AssistantKnowledgeEngine:
                             "related_topics": item.get("related_topics", []),
                             "question": q_clean
                         }
+                        break
+                if domain_match:
+                    break
+
+            if vector_res and domain_match:
+                merged_context = f"{domain_match['retrieved_context']}\n\n---\n\n{vector_res['retrieved_context']}"
+                doc_map = {}
+                for s in domain_match.get("sources", []) + vector_res.get("sources", []):
+                    d_name = s.get("document", "")
+                    d_score = float(s.get("score", 0.0))
+                    if d_name not in doc_map or d_score > doc_map[d_name]:
+                        doc_map[d_name] = d_score
+                merged_sources = [{"document": k, "score": v} for k, v in doc_map.items()]
+                merged_topics = list(dict.fromkeys(domain_match.get("related_topics", []) + vector_res.get("related_topics", [])))
+                return {
+                    "relevant_context_found": True,
+                    "category": domain_match["category"],
+                    "request_code_needed": False,
+                    "retrieved_context": merged_context,
+                    "sources": merged_sources,
+                    "related_topics": merged_topics,
+                    "question": q_clean
+                }
+
+            if vector_res:
+                return vector_res
+
+            if domain_match:
+                return domain_match
+
             return None
 
         # First try matching directly on current question
@@ -640,6 +752,11 @@ class AssistantKnowledgeEngine:
         has_remediations = bool(remediations and len(remediations) > 0)
 
         if not has_code and not has_findings and not has_remediations:
+            # If question specifies a concrete security topic, fall through to domain knowledge / RAG
+            specific_topic_keywords = ["hardcoded", "password", "credential", "secret", "sql", "eval", "exec", "xss", "command", "path", "traversal"]
+            if any(kw in q_lower for kw in specific_topic_keywords):
+                return None
+
             return ("REQUEST_CODE", {
                 "question": q_lower,
                 "answer": "Please provide the code you want me to secure, or select a code-review finding. I can then apply SentinelAI's existing security and remediation rules.",

@@ -226,11 +226,21 @@ class ConversationalCodeAssistant:
         # Update conversation memory
         self._update_history(q_text, generated_answer)
 
+        # Deduplicate final sources list by document name
+        raw_sources = retrieved.get("sources", [])
+        dedup_sources = []
+        seen_docs = set()
+        for s in raw_sources:
+            doc_name = s.get("document", "")
+            if doc_name and doc_name not in seen_docs:
+                seen_docs.add(doc_name)
+                dedup_sources.append(s)
+
         return {
             "question": q_text,
             "answer": generated_answer,
             "source": self.source,
-            "sources": retrieved.get("sources", []),
+            "sources": dedup_sources,
             "related_topics": retrieved.get("related_topics", []),
             "model": self.model,
             "generated_by": "ollama"
